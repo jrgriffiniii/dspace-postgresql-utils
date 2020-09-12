@@ -149,7 +149,7 @@ module CLI
       def select_items_by_metadata(metadata_field, metadata_value)
         query = build_select_items_by_metadata_query
         schema_name, metadata_field_element, metadata_field_qualifier = metadata_field.split('.')
-        yield execute_statement(query, schema_name, metadata_field_element, metadata_field_qualifier, metadata_value)
+        execute_statement(query, schema_name, metadata_field_element, metadata_field_qualifier, metadata_value)
       end
 
       def build_update_resource_policies_statement
