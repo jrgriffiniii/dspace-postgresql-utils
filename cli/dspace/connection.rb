@@ -7,9 +7,9 @@ module CLI
         "SELECT coll2i.collection_id, comm2coll.community_id FROM community2collection AS comm2coll INNER JOIN collection2item AS coll2i ON coll2i.collection_id=comm2coll.collection_id WHERE coll2i.item_id=$1"
       end
 
-      def select_community_collections_query(item_id)
+      def select_community_collections(item_id)
         statement = build_select_community_collections_query
-        execute_statement(statement, item_id)
+        yield execute_statement(statement, item_id)
       end
 
       def build_update_community_statement
@@ -45,10 +45,13 @@ module CLI
         row.values_at('item_id').first.to_i + 1
       end
 
-      def insert_item(*item_values)
-        statement = build_insert_item_statement
-        execute_statement(statement, *item_values)
-        item_id = select_new_item_id
+      def build_delete_item_to_bundle_statement
+        "DELETE FROM item2bundle WHERE item2bundle.item_id=$1"
+      end
+
+      def delete_item_to_bundle_by_item(item_id)
+        statement = build_delete_item_to_bundle_statement
+        execute_statement(statement, item_id)
       end
 
       def build_delete_item_statement
@@ -56,8 +59,35 @@ module CLI
       end
 
       def delete_item(item_id)
+        delete_item_to_bundle_by_item(item_id)
+
         statement = build_delete_item_statement
         execute_statement(statement, item_id)
+      end
+
+      def build_select_item_by_title_query
+        "SELECT i.item_id FROM item as i INNER JOIN metadatavalue AS v ON v.resource_id=i.item_id INNER JOIN metadatafieldregistry AS r ON r.metadata_field_id=v.metadata_field_id WHERE r.metadata_schema_id=1 AND r.element='title' AND r.qualifier IS NULL AND v.text_value=$1"
+      end
+
+      def find_by_title_metadata(title)
+        select_statement = build_select_item_by_title_query
+        rows = execute_statement(select_statement, title)
+        rows.to_a.map { |row| row['item_id'] }
+      end
+
+      def build_select_title_by_item_query
+        "SELECT v.text_value FROM item as i INNER JOIN metadatavalue AS v ON v.resource_id=i.item_id INNER JOIN metadatafieldregistry AS r ON r.metadata_field_id=v.metadata_field_id WHERE r.metadata_schema_id=1 AND r.element='title' AND r.qualifier IS NULL AND i.item_id=$1"
+      end
+
+      def find_titles_by_item_id(item_id)
+        select_statement = build_select_title_by_item_query
+        rows = execute_statement(select_statement, item_id)
+        rows.to_a.map { |row| row['text_value'] }
+      end
+
+      def insert_item(*item_values)
+        statement = build_insert_item_statement
+        execute_statement(statement, *item_values)
       end
 
       def build_select_new_metadata_value_id
@@ -110,13 +140,16 @@ module CLI
         @connection = build_connection
       end
 
-      def build_select_items_query
-        "SELECT item.item_id, item.submitter_id, item.in_archive, item.withdrawn, item.owning_collection, item.last_modified, item.discoverable, r2.element, r2.qualifier, metadatavalue.metadata_field_id, metadatavalue.text_value, metadatavalue.text_lang, metadatavalue.resource_type_id FROM item INNER JOIN metadatavalue ON metadatavalue.resource_id=item.item_id INNER JOIN metadatafieldregistry AS r2 ON metadatavalue.metadata_field_id=r2.metadata_field_id WHERE (metadatavalue.resource_type_id=2 AND r2.element='title') and item.item_id in (select i.item_id from item as i inner join metadatavalue as v on v.resource_id=i.item_id inner join metadatafieldregistry as r on v.metadata_field_id=r.metadata_field_id where r.element = 'date' and r.qualifier='classyear' and v.text_value=$1 and v.resource_type_id=2)"
+      def build_select_items_by_metadata_query
+        <<-SQL
+        SELECT i2.item_id, i2.submitter_id, i2.in_archive, i2.withdrawn, i2.owning_collection, i2.last_modified, i2.discoverable, schema2.short_id, r2.element, r2.qualifier, v2.metadata_field_id,v2.text_value, v2.text_lang, v2.resource_type_id FROM item AS i2 INNER JOIN metadatavalue AS v2 ON v2.resource_id=i2.item_id INNER JOIN metadatafieldregistry AS r2 ON v2.metadata_field_id=r2.metadata_field_id INNER JOIN metadataschemaregistry AS schema2 ON schema2.metadata_schema_id=r2.metadata_schema_id WHERE i2.item_id IN (SELECT i.item_id FROM item AS i INNER JOIN metadatavalue AS v ON v.resource_id=i.item_id INNER JOIN metadatafieldregistry AS r ON v.metadata_field_id=r.metadata_field_id INNER JOIN metadataschemaregistry AS schema ON schema.metadata_schema_id=r.metadata_schema_id WHERE v.text_value=$4 AND v.resource_type_id=2 AND schema.short_id=$1 AND r.element=$2 AND r.qualifier=$3)
+        SQL
       end
 
-      def select_items(class_year)
-        query = build_select_items_query
-        yield execute_statement(query, class_year)
+      def select_items_by_metadata(metadata_field, metadata_value)
+        query = build_select_items_by_metadata_query
+        schema_name, metadata_field_element, metadata_field_qualifier = metadata_field.split('.')
+        yield execute_statement(query, schema_name, metadata_field_element, metadata_field_qualifier, metadata_value)
       end
 
       def build_update_resource_policies_statement
@@ -129,20 +162,24 @@ module CLI
       end
 
       def build_select_bundle_bitstreams_query
-        "SELECT bitstream.*, bundle.*, b2b.bitstream_id, b2b.bundle_id FROM bundle2bitstream AS b2b INNER JOIN item2bundle AS i2b ON i2b.bundle_id=b2b.bundle_id INNER JOIN bundle ON bundle.bundle_id=b2b.bundle_id INNER JOIN bitstream ON bitstream.bitstream_id=b2b.bitstream_id WHERE i2b.item_id=$1"
+        "SELECT bitstream.*, bundle.*, b2b.bitstream_id, b2b.bundle_id, b2b.bitstream_order FROM bundle2bitstream AS b2b INNER JOIN item2bundle AS i2b ON i2b.bundle_id=b2b.bundle_id INNER JOIN bundle ON bundle.bundle_id=b2b.bundle_id INNER JOIN bitstream ON bitstream.bitstream_id=b2b.bitstream_id WHERE i2b.item_id=$1"
       end
 
       def select_bundle_bitstreams(item_id)
         statement = build_select_bundle_bitstreams_query
-        execute_statement(statement, item_id)
+        yield execute_statement(statement, item_id)
       end
 
       def build_insert_bundle_statement
-        "INSERT into bundle (bitstream_id, primary_bitstream_id) VALUES ($1, $2)"
+        "INSERT into bundle (bundle_id, primary_bitstream_id) VALUES ($1, $2)"
       end
 
-      def build_update_bundle_statement
+      def build_insert_item_to_bundle_statement
         "INSERT INTO item2bundle (id, item_id, bundle_id) VALUES ($1, $2, $3)"
+      end
+
+      def build_update_item_to_bundle_statement
+        "UPDATE item2bundle SET item_id=$1 WHERE item_id=$2"
       end
 
       def build_select_new_bundle_id
@@ -167,16 +204,19 @@ module CLI
         row.values_at('id').first.to_i + 1
       end
 
+      def update_bundle(next_item_id, prev_item_id)
+        update_statement = build_update_item_to_bundle_statement
+        execute_statement(update_statement, next_item_id, prev_item_id)
+      end
+
       def insert_bundle(next_item_id, *bundle_values)
-        insert_statement = build_insert_bundle_statement
-        # bundle_id = execute_statement(insert_statement, *bundle_values)
         bundle_id = bundle_values.first
+        insert_statement = build_insert_bundle_statement
         execute_statement(insert_statement, *bundle_values)
 
         next_item_to_bundle_id = select_next_item_to_bundle_id
-        update_statement = build_update_bundle_statement
-        execute_statement(update_statement, next_item_to_bundle_id, next_item_id, bundle_id)
-        new_bundle_id = select_new_bundle_id
+        insert_i2b_statement = build_insert_item_to_bundle_statement
+        execute_statement(insert_i2b_statement, next_item_to_bundle_id, next_item_id, bundle_id)
       end
 
       def build_insert_bitstream_statement
@@ -192,19 +232,30 @@ module CLI
       end
 
       def select_new_bitstream_id
+        select_statement = build_select_new_bitstream_id
         rows = execute_statement(select_statement)
         row = rows.first
         row.values_at('bitstream_id').first.to_i + 1
       end
 
-      def insert_bitstream(bundle_id, bitstream_order, *bitstream_values)
+      def build_select_new_bundle_to_bitstream_id
+        "SELECT id FROM bundle2bitstream ORDER BY id DESC LIMIT 1"
+      end
+
+      def select_new_bundle_to_bitstream_id
+        select_statement = build_select_new_bundle_to_bitstream_id
+        rows = execute_statement(select_statement)
+        row = rows.first
+        row.values_at('id').first.to_i + 1
+      end
+
+      def insert_bitstream(bundle_id, bitstream_id, bitstream_order, *bitstream_values)
         insert_statement = build_insert_bitstream_statement
-        bitstream_id = execute_statement(insert_statement, *bitstream_values)
+        execute_statement(insert_statement, *bitstream_values)
 
         update_statement = build_update_bitstream_statement
-        execute_statement(update_statement, bundle_id, bitstream_id, bitstream_order)
-
-        bitstream_id = select_new_bitstream_id
+        new_bundle_to_bitstream_id = select_new_bundle_to_bitstream_id
+        execute_statement(update_statement, new_bundle_to_bitstream_id, bundle_id, bitstream_id, bitstream_order)
       end
 
       def build_update_handle_statement
