@@ -35,6 +35,7 @@ class Dataspace < Thor
     next_dspace = CLI::DSpace::Repository.new(dest_db_host, dest_db_port, dest_db_name, dest_db_user, dest_db_password)
     persisted_items = {}
     replaced_items = {}
+    deleted_items = []
 
     prev_dspace.connection.select_items(class_year) do |result|
       result.each do |row|
@@ -50,7 +51,6 @@ class Dataspace < Thor
           new_item_id = persisted_items[item_id]
         else
           logger.info "Creating a new Item for #{item_id}..."
-          # new_item_id = next_dspace.connection.insert_item(*item_values)
           next_dspace.connection.insert_item(*item_values)
 
           persisted_items[item_id] = new_item_id
@@ -82,6 +82,7 @@ class Dataspace < Thor
 
         # Deleting Metadata rows
         next_dspace.connection.delete_metadata_values(replaced_item_id)
+        logger.info "Deleting the old metadata values for #{replaced_item_id}..."
 
         # Query for the community and collection
         persisted_communities = {}
@@ -99,6 +100,12 @@ class Dataspace < Thor
             next_dspace.connection.update_collection(new_item_id, replaced_item_id)
             logger.info "Updated the collection membership for #{new_item_id}"
           end
+        end
+
+        if !deleted_items.include?(replaced_item_id)
+          next_dspace.connection.delete_item(replaced_item_id)
+          logger.info "Deleting the replaced Item #{replaced_item_id}..."
+          deleted_items << replaced_item_id
         end
 
         # Update the Item policies
@@ -134,6 +141,7 @@ class Dataspace < Thor
             new_bitstream_id = next_dspace.connection.select_new_bitstream_id
 
             bitstream_values = [new_bitstream_id]
+            # I may need to use the internal_id, store_number, and sequence_id from the replaced Item
             bitstream_values += bitstream_row.values_at('bitstream_format_id', 'checksum', 'checksum_algorithm', 'internal_id', 'deleted', 'store_number', 'sequence_id', 'size_bytes')
 
             next_dspace.connection.insert_bitstream(new_bundle_id, new_bitstream_id, bitstream_order, *bitstream_values)

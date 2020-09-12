@@ -45,6 +45,26 @@ module CLI
         row.values_at('item_id').first.to_i + 1
       end
 
+      def build_delete_item_to_bundle_statement
+        "DELETE FROM item2bundle WHERE item2bundle.item_id=$1"
+      end
+
+      def delete_item_to_bundle_by_item(item_id)
+        statement = build_delete_item_to_bundle_statement
+        execute_statement(statement, item_id)
+      end
+
+      def build_delete_item_statement
+        "DELETE FROM item WHERE item.item_id=$1"
+      end
+
+      def delete_item(item_id)
+        delete_item_to_bundle_by_item(item_id)
+
+        statement = build_delete_item_statement
+        execute_statement(statement, item_id)
+      end
+
       def build_select_item_by_title_query
         "SELECT i.item_id FROM item as i INNER JOIN metadatavalue AS v ON v.resource_id=i.item_id INNER JOIN metadatafieldregistry AS r ON r.metadata_field_id=v.metadata_field_id WHERE r.metadata_schema_id=1 AND r.element='title' AND r.qualifier IS NULL AND v.text_value=$1"
       end
@@ -72,15 +92,6 @@ module CLI
         statement = build_insert_item_statement
         execute_statement(statement, *item_values)
         item_id = select_new_item_id
-      end
-
-      def build_delete_item_statement
-        "DELETE FROM item WHERE item.item_id=$1"
-      end
-
-      def delete_item(item_id)
-        statement = build_delete_item_statement
-        execute_statement(statement, item_id)
       end
 
       def build_select_new_metadata_value_id
@@ -191,9 +202,8 @@ module CLI
       end
 
       def insert_bundle(next_item_id, *bundle_values)
-        insert_statement = build_insert_bundle_statement
-        # bundle_id = execute_statement(insert_statement, *bundle_values)
         bundle_id = bundle_values.first
+        insert_statement = build_insert_bundle_statement
         execute_statement(insert_statement, *bundle_values)
 
         next_item_to_bundle_id = select_next_item_to_bundle_id
