@@ -2,11 +2,10 @@
 require_relative 'cli/dspace'
 
 class Dataspace < Thor
-
-  option :db_host, :type => :string
-  option :db_port, :type => :string
-  option :db_name, :type => :string
-  option :db_user, :type => :string
+  option :db_host, type: :string
+  option :db_port, type: :string
+  option :db_name, type: :string
+  option :db_user, type: :string
   option :class_year, type: :string
   desc "Retrieve the 2020 student theses Items"
 
@@ -25,7 +24,7 @@ class Dataspace < Thor
 
     prev_dspace = DSpace.new(db_host, db_port, db_name, db_user, db_password)
     next_dspace = DSpace.new(db_host, db_port, db_name, db_user, db_password)
-    migrated_items = []
+    persisted_items = {}
 
     prev_dspace.select_items(class_year) do |rows|
       rows.each do |row|
@@ -33,54 +32,57 @@ class Dataspace < Thor
         item_values = row.values_at('item.item_id', 'item.submitter_id', 'item.in_archive', 'item.owning_collection', 'item.last_modified')
         item_id = item_values.first
 
-        if !migrated_items.include?(item_id)
-          next_dspace.insert_item(*item_values)
-          prev_dspace.delete_item(item_id)
+        if persisted_items.key?(item_id)
+          new_item_id = persisted_items[item_id]
+        else
+          new_item_id = next_dspace.insert_item(*item_values)
 
-          persisted_item[item_id] = item_values
+          persisted_item[item_id] = new_item_id
         end
 
         # Inserting Metadata rows
-        metadata_value_values = row.values_at('metadatavalue.metadata_value_id', 'metadatavalue.resource_id', 'metadatavalue.text_value', 'metadatavalue.metadata_field_id', 'metadatavalue.text_value', 'metadatavalue.resource_type_id')
+        metadata_value_values = row.values_at('metadatavalue.metadata_value_id')
+        metadata_value_values << new_item_id
+        metadata_value_values += row.values_at('metadatavalue.text_value', 'metadatavalue.metadata_field_id', 'metadatavalue.text_value', 'metadatavalue.resource_type_id')
         next_dspace.insert_metadata_value(*metadata_value_values)
 
         # Deleting Metadata rows
-        prev_dspace.delete_metadata_values(item_id)
+        next_dspace.delete_metadata_values(item_id)
 
         # Query for the community and collection
-        persisted_communities = []
+        persisted_communities = {}
         prev_dspace.select_community_collections_query(item_id) do |collection_row|
 
-          if !persisted_communities.include?(community_id)
-            community_id = collection_row.values_at('comm2i.community_id')
+          if !persisted_communities.key?(community_id)
+            community_id = collection_row.values_at('comm2i.community_id').first
             next_dspace.update_community(next_item_id, item_id)
-
-            persisted_communities << community_id
+            persisted_communities[community_id] = community_id
           end
 
-          collection_id = collection_row.values_at('coll2i.collection_id')
-          next_dspace.update_collection(collection_id, item_id)
+          next_dspace.update_collection(next_item_id, item_id)
         end
 
         # Update the Item policies
         next_dspace.update_resource_policies(next_item_id, item_id)
 
-        persisted_bundles = []
+        persisted_bundles = {}
         prev_dspace.select_bundle_bitstreams(item_id) do |bitstream_row|
 
-          bundle_id = bitstream_row.values_at('coll2i.collection_id')
-          primary_bitstream_id = bitstream_row.values_at('bundle.primary_bitstream_id')
+          bundle_id = bitstream_row.values_at('b2b.bundle_id').first
+          primary_bitstream_id = bitstream_row.values_at('bundle.primary_bitstream_id').first
 
-          if !persisted_bundles.include?(bundle_id)
+          if persisted_bundles.key?(bundle_id)
+            new_bundle_id = persisted_bundles[bundle_id]
+          else
             new_bundle_id = next_dspace.insert_bundle(next_id, item_id, primary_bitstream_id)
             next_dspace.update_resource_policies(bundle_id, new_bundle_id)
 
-            persisted_bundles << bundle_id
+            persisted_bundles[bundle_id] = new_bundle_id
           end
 
-          bitstream_id = bitstream_row.values_at('bitstream.bitstream_id')
-
-          next_dspace.insert_bitstream(bitstream_id, item_id)
+          bitstream_order = row.values_at('b2b.bitstream_order').first
+          bitstream_values = row.values_at('bitstream.bitstream_format_id', 'bitstream.checksum', 'bitstream.checksum_algorithm', 'bitstream.internal_id', 'bitstream.deleted', 'bitstream.store_number', 'bitstream.sequence_id', 'bitstream.size_bytes')
+          new_bitstream_id = next_dspace.insert_bitstream(new_bundle_id, bitstream_order, *bitstream_values)
           next_dspace.update_resource_policies(bitstream_id, new_bitstream_id)
         end
 

@@ -31,9 +31,20 @@ module CLI
       "INSERT INTO item (item_id, submitter_id, in_archive, withdrawn, owning_collection, last_modified, discoverable) VALUES ($1, $2, $3, FALSE, $4, TRUE)"
     end
 
+    def build_select_new_item_id
+      "SELECT item_id FROM item ORDER BY item_id DESC LIMIT 1"
+    end
+
+    def select_new_item_id
+      rows = execute_statement(select_statement)
+      row = rows.first
+      row.values_at('item_id')
+    end
+
     def insert_item(*item_values)
       statement = build_insert_item_statement
       execute_statement(statement, *item_values)
+      item_id = select_new_item_id
     end
 
     def build_delete_item_statement
@@ -103,7 +114,7 @@ module CLI
     end
 
     def build_select_bundle_bitstreams_query
-      "SELECT b2b.bitstream_id, b2b.bundle_id FROM bundle2bitstream AS b2b INNER JOIN item2bundle AS i2b ON i2b.bundle_id=b2b.bundle_id WHERE i2b.item_id=$1"
+      "SELECT bitstream.*, bundler.*, b2b.bitstream_id, b2b.bundle_id FROM bundle2bitstream AS b2b INNER JOIN item2bundle AS i2b ON i2b.bundle_id=b2b.bundle_id INNER JOIN bundle ON bundle.bundle_id=b2b.bundle_id INNER JOIN bitsteam ON bitstream.bitstream_id=b2b.bitstream_id WHERE i2b.item_id=$1"
     end
 
     def select_bundle_bitstreams(item_id)
@@ -119,12 +130,79 @@ module CLI
       "INSERT INTO item2bundle (item_id, bundle_id) VALUES ($1, $2)"
     end
 
+    def build_select_new_bundle_id
+      "SELECT bundle_id FROM bundle ORDER BY bundle_id DESC LIMIT 1"
+    end
+
+    def select_new_bundle_id
+      rows = execute_statement(select_statement)
+      row = rows.first
+      row.values_at('bundle_id')
+    end
+
+    # I can't tell if this should be update or insert
     def insert_bundle(next_item_id, *bundle_values)
       insert_statement = build_insert_bundle_statement
       bundle_id = execute_statement(insert_statement, *bundle_values)
 
       update_statement = build_update_bundle_statement
       execute_statement(update_statement, next_item_id, bundle_id)
+      new_bundle_id = select_new_bundle_id
+    end
+
+    def build_insert_bitstream_statement
+      "INSERT into bitstream ($1, $2, $3, $4, $5, $6, $7, $8) VALUES (bitstream_format_id, checksum, checksum_algorithm, internal_id, deleted, store_number, sequence_id, size_bytes)"
+    end
+
+    def build_update_bitstream_statement
+      "INSERT INTO bundle2bitstream (bundle_id, bitstream_id, bitstream_order) VALUES ($1, $2, $3)"
+    end
+
+    def build_select_new_bitstream_id
+      "SELECT bitstream_id FROM bitstream ORDER BY bitstream_id DESC LIMIT 1"
+    end
+
+    def select_new_bitstream_id
+      rows = execute_statement(select_statement)
+      row = rows.first
+      row.values_at('bitstream_id')
+    end
+
+    def insert_bitstream(bundle_id, bitstream_order, *bitstream_values)
+      insert_statement = build_insert_bitstream_statement
+      bitstream_id = execute_statement(insert_statement, *bitstream_values)
+
+      update_statement = build_update_bitstream_statement
+      execute_statement(update_statement, bundle_id, bitstream_id, bitstream_order)
+
+      bitstream_id = select_new_bitstream_id
+    end
+
+    def build_update_handle_statement
+      "UPDATE handle SET resource_id=$1 WHERE resource_id=$2"
+    end
+
+    def update_handle(next_item_id, item_id)
+      statement = build_update_handle_statement
+      execute_statement(statement, next_item_id, item_id)
+    end
+
+    def build_update_workflow_item_statement
+      "UPDATE workflowitem SET item_id=$1 WHERE item_id=$2"
+    end
+
+    def update_workflow_item(next_item_id, item_id)
+      statement = build_update_workflow_item_statement
+      execute_statement(statement, next_item_id, item_id)
+    end
+
+    def build_update_workspace_item_statement
+      "UPDATE workspaceitem SET item_id=$1 WHERE item_id=$2"
+    end
+
+    def update_workspace_item(next_item_id, item_id)
+      statement = build_update_workspace_item_statement
+      execute_statement(statement, next_item_id, item_id)
     end
 
     private
