@@ -7,9 +7,9 @@ module CLI
         "SELECT coll2i.collection_id, comm2coll.community_id FROM community2collection AS comm2coll INNER JOIN collection2item AS coll2i ON coll2i.collection_id=comm2coll.collection_id WHERE coll2i.item_id=$1"
       end
 
-      def select_community_collections_query(item_id)
+      def select_community_collections(item_id)
         statement = build_select_community_collections_query
-        execute_statement(statement, item_id)
+        yield execute_statement(statement, item_id)
       end
 
       def build_update_community_statement
@@ -129,16 +129,16 @@ module CLI
       end
 
       def build_select_bundle_bitstreams_query
-        "SELECT bitstream.*, bundle.*, b2b.bitstream_id, b2b.bundle_id FROM bundle2bitstream AS b2b INNER JOIN item2bundle AS i2b ON i2b.bundle_id=b2b.bundle_id INNER JOIN bundle ON bundle.bundle_id=b2b.bundle_id INNER JOIN bitstream ON bitstream.bitstream_id=b2b.bitstream_id WHERE i2b.item_id=$1"
+        "SELECT bitstream.*, bundle.*, b2b.bitstream_id, b2b.bundle_id, b2b.bitstream_order FROM bundle2bitstream AS b2b INNER JOIN item2bundle AS i2b ON i2b.bundle_id=b2b.bundle_id INNER JOIN bundle ON bundle.bundle_id=b2b.bundle_id INNER JOIN bitstream ON bitstream.bitstream_id=b2b.bitstream_id WHERE i2b.item_id=$1"
       end
 
       def select_bundle_bitstreams(item_id)
         statement = build_select_bundle_bitstreams_query
-        execute_statement(statement, item_id)
+        yield execute_statement(statement, item_id)
       end
 
       def build_insert_bundle_statement
-        "INSERT into bundle (bitstream_id, primary_bitstream_id) VALUES ($1, $2)"
+        "INSERT into bundle (bundle_id, primary_bitstream_id) VALUES ($1, $2)"
       end
 
       def build_update_bundle_statement
@@ -192,17 +192,30 @@ module CLI
       end
 
       def select_new_bitstream_id
+        select_statement = build_select_new_bitstream_id
         rows = execute_statement(select_statement)
         row = rows.first
         row.values_at('bitstream_id').first.to_i + 1
       end
 
-      def insert_bitstream(bundle_id, bitstream_order, *bitstream_values)
+      def build_select_new_bundle_to_bitstream_id
+        "SELECT id FROM bundle2bitstream ORDER BY id DESC LIMIT 1"
+      end
+
+      def select_new_bundle_to_bitstream_id
+        select_statement = build_select_new_bundle_to_bitstream_id
+        rows = execute_statement(select_statement)
+        row = rows.first
+        row.values_at('id').first.to_i + 1
+      end
+
+      def insert_bitstream(bundle_id, bitstream_id, bitstream_order, *bitstream_values)
         insert_statement = build_insert_bitstream_statement
-        bitstream_id = execute_statement(insert_statement, *bitstream_values)
+        execute_statement(insert_statement, *bitstream_values)
 
         update_statement = build_update_bitstream_statement
-        execute_statement(update_statement, bundle_id, bitstream_id, bitstream_order)
+        new_bundle_to_bitstream_id = select_new_bundle_to_bitstream_id
+        execute_statement(update_statement, new_bundle_to_bitstream_id, bundle_id, bitstream_id, bitstream_order)
 
         bitstream_id = select_new_bitstream_id
       end
