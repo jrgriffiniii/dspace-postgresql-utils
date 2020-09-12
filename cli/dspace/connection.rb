@@ -152,6 +152,36 @@ module CLI
         execute_statement(query, schema_name, metadata_field_element, metadata_field_qualifier, metadata_value)
       end
 
+      def build_select_item_by_metadata_query
+        <<-SQL
+        SELECT i2.item_id, i2.submitter_id, i2.in_archive, i2.withdrawn, i2.owning_collection, i2.last_modified, i2.discoverable, s2.short_id, r2.element, r2.qualifier, v2.metadata_field_id,v2.text_value, v2.text_lang, v2.resource_type_id
+          FROM item AS i2
+          INNER JOIN metadatavalue AS v2 ON v2.resource_id=i2.item_id
+          INNER JOIN metadatafieldregistry AS r2 ON r2.metadata_field_id=v2.metadata_field_id
+          INNER JOIN metadataschemaregistry AS s2 ON s2.metadata_schema_id=r2.metadata_schema_id
+
+          WHERE i2.item_id IN (
+
+            SELECT i.item_id FROM item AS i
+              INNER JOIN metadatavalue AS v ON v.resource_id=i.item_id
+              INNER JOIN metadatafieldregistry AS r ON r.metadata_field_id=v.metadata_field_id
+              INNER JOIN metadataschemaregistry AS s ON s.metadata_schema_id=r.metadata_schema_id
+              WHERE s.short_id=$1
+                AND r.element=$2
+                AND r.qualifier=$3
+                AND v.text_value=$4
+              GROUP BY item_id
+              LIMIT 1
+          )
+        SQL
+      end
+
+      def select_item_by_metadata(metadata_field, metadata_value)
+        query = build_select_item_by_metadata_query
+        schema_name, metadata_field_element, metadata_field_qualifier = metadata_field.split('.')
+        execute_statement(query, schema_name, metadata_field_element, metadata_field_qualifier, metadata_value)
+      end
+
       def build_update_resource_policies_statement
         "UPDATE resourcepolicy SET resource_id=$1 WHERE resource_id=$2"
       end

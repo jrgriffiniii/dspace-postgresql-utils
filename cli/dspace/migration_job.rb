@@ -150,24 +150,24 @@ module CLI
           # Migrate the workspace item
           @destination_repository.connection.update_workspace_item(new_item_id, replaced_item_id)
           logger.info "Updated the workspace items for #{new_item_id}..."
+        end
 
-          while !item_deletion_queue.empty?
-            deleted_item_id = item_deletion_queue.shift
+        while !item_deletion_queue.empty?
+          deleted_item_id = item_deletion_queue.shift
 
-            if !deleted_items.include?(deleted_item_id)
-              # Deleting Metadata rows
-              @destination_repository.connection.delete_metadata_values(deleted_item_id)
-              logger.info "Deleting the old metadata values for #{deleted_item_id}..."
+          if !deleted_items.include?(deleted_item_id)
+            # Deleting Metadata rows
+            @destination_repository.connection.delete_metadata_values(deleted_item_id)
+            logger.info "Deleting the old metadata values for #{deleted_item_id}..."
 
-              begin
-                @destination_repository.connection.delete_item(deleted_item_id)
-                logger.info "Deleting the replaced Item #{deleted_item_id}..."
-              rescue StandardError => error
-                logger.warn "Failed to delete Item #{deleted_item_id}: #{error}"
-              end
-
-              deleted_items << deleted_item_id
+            begin
+              @destination_repository.connection.delete_item(deleted_item_id)
+              logger.info "Deleting the replaced Item #{deleted_item_id}..."
+            rescue StandardError => error
+              logger.warn "Failed to delete Item #{deleted_item_id}: #{error}"
             end
+
+            deleted_items << deleted_item_id
           end
         end
       end
