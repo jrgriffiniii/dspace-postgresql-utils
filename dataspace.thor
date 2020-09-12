@@ -2,29 +2,29 @@ require_relative 'cli/dspace/repository'
 require 'thor'
 
 class Dataspace < Thor
-  # Source database
-  option :db_host, type: :string
-  option :db_port, type: :string
-  option :db_name, type: :string
-  option :db_user, type: :string
-  option :class_year, type: :string
+  option :config_file_path, type: :string, aliases: '-c'
+  option :class_year, type: :string, aliases: '-y'
+
   desc "student_theses_migrate", "Migrate the student theses DataSpace Items"
 
   def student_theses_migrate
-    db_host_env = ENV.fetch('PGHOST', 'localhost')
-    db_port_env = ENV.fetch('PGPORT', 5432)
-    db_name_env = ENV.fetch('PGDATABASE', 'database')
-    db_user_env = ENV.fetch('PGUSER', 'user')
-    db_password = ENV.fetch('PGPASSWORD', 'secret')
+    db_host = config.source_database.db_host
+    db_port = config.source_database.db_port
+    db_name = config.source_database.db_name
+    db_user = config.source_database.db_user
+    db_password = config.source_database.db_password
 
-    db_host = option.fetch(:db_host, db_host_env)
-    db_port = option.fetch(:db_port, db_port_env)
-    db_name = option.fetch(:db_name, db_name_env)
-    db_user = option.fetch(:db_user, db_user_env)
-    class_year = option.fetch(:class_year, '2020')
+    dest_db_host = config.dest_database.db_host
+    dest_db_port = config.dest_database.db_port
+    dest_db_name = config.dest_database.db_name
+    dest_db_user = config.dest_database.db_user
+    dest_db_password = config.dest_database.db_password
+
+    @config_file_path = options.fetch(:config_file, File.join(File.dirname(__FILE__), 'config', 'databases.yml'))
+    class_year = config.fetch(:class_year, '2020')
 
     prev_dspace = DSpace::Repository.new(db_host, db_port, db_name, db_user, db_password)
-    next_dspace = DSpace::Repository.new(db_host, db_port, db_name, db_user, db_password)
+    next_dspace = DSpace::Repository.new(dest_db_host, dest_db_port, dest_db_name, dest_db_user, dest_db_password)
     persisted_items = {}
 
     prev_dspace.select_items(class_year) do |rows|
@@ -95,10 +95,22 @@ class Dataspace < Thor
 
         # Migrate the workspace item
         next_dspace.update_workspace_item(next_item_id, item_id)
-
       end
     end
 
+    no_commands do
+      def config_file
+        File.open(@config_file_path, "rb")
+      end
+
+      def config_values
+        YAML.load(config_file)
+      end
+
+      def config
+        @config ||= OpenStruct.new(config_values)
+      end
+    end
   end
 end
 
