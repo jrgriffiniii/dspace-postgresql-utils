@@ -35,21 +35,25 @@ class Dspace < Thor
 
     prev_dspace = CLI::DSpace::Repository.new(db_host, db_port, db_name, db_user, db_password)
     next_dspace = CLI::DSpace::Repository.new(dest_db_host, dest_db_port, dest_db_name, dest_db_user, dest_db_password)
+
     persisted_items = {}
     replaced_items = {}
-    deleted_items = []
     unmatched_items = []
+    duplicated_items = []
+    item_deletion_queue = []
+    deleted_items = []
 
     prev_dspace.connection.select_items_by_metadata(metadata_field, metadata_value) do |result|
-      result.each do |row|
+
+      item_rows = result.to_a
+      item_rows.each do |row|
 
         new_item_id = next_dspace.connection.select_new_item_id
         item_values = [new_item_id]
         item_values += row.values_at('submitter_id', 'in_archive', 'owning_collection', 'last_modified')
-        item_id = row.values_at('item_id').first
+        item_id = row['item_id']
         next if unmatched_items.include?(item_id)
-
-        logger.info "Importing #{item_id}..."
+        next if duplicated_items.include?(item_id)
 
         # Find the old Item by metadata
         item_titles = prev_dspace.connection.find_titles_by_item_id(item_id)
@@ -57,29 +61,39 @@ class Dspace < Thor
         if replaced_items.key?(item_id)
           replaced_item_id = replaced_items[item_id]
         else
+          replaced_item_ids = []
           item_titles.each do |item_title|
             results = next_dspace.connection.find_by_title_metadata(item_title)
-            replaced_item_id = results unless results.nil?
+            replaced_item_ids = results unless results.empty?
           end
 
           # Skip this import if the matching Item cannot be found
-          if replaced_item_id.nil?
+          if replaced_item_ids.empty?
             logger.warn "Failed to find the matching Item for #{item_id} using the titles: #{item_titles.join(', ')}. Skipping the import..."
             unmatched_items << item_id
             next
+          elsif replaced_item_ids.length > 1
+            logger.warn "Found multiple matching Items for #{item_id} using the titles: #{item_titles.join(', ')}. Skipping the import..."
+            duplicated_items << item_id
+            next
           end
 
+          replaced_item_id = replaced_item_ids.first
           replaced_items[item_id] = replaced_item_id
         end
 
         if persisted_items.key?(item_id)
+          logger.info "Updating #{item_id}..."
           new_item_id = persisted_items[item_id]
         else
+          logger.info "Importing #{item_id}..."
           logger.info "Creating a new Item for #{item_id}..."
           next_dspace.connection.insert_item(*item_values)
 
           persisted_items[item_id] = new_item_id
           logger.info "Created #{new_item_id}..."
+
+          item_deletion_queue << replaced_item_id
         end
 
         # Inserting Metadata rows
@@ -87,11 +101,14 @@ class Dspace < Thor
         metadata_value_values = [ new_metadata_value_id, new_item_id ]
         metadata_value_values += row.values_at('metadata_field_id', 'text_value', 'text_lang', 'resource_type_id')
         next_dspace.connection.insert_metadata_value(*metadata_value_values)
-        logger.info "Created metadata value #{new_metadata_value_id}..."
 
-        # Deleting Metadata rows
-        next_dspace.connection.delete_metadata_values(replaced_item_id)
-        logger.info "Deleting the old metadata values for #{replaced_item_id}..."
+        schema_name = row['short_id']
+        element = row['element']
+        qualifier = row['qualifier']
+        new_metadata_field = "#{schema_name}.#{element}"
+        new_metadata_field += ".#{qualifier}" unless qualifier.nil?
+        new_metadata_value = row['text_value']
+        logger.info "Created metadata value #{new_metadata_value_id}: #{new_metadata_field}: #{new_metadata_value}..."
 
         # Query for the community and collection
         updated_collections = []
@@ -121,40 +138,18 @@ class Dspace < Thor
         logger.info "Updated the Item authorization policies for #{new_item_id}..."
 
         persisted_bundles = {}
-        prev_dspace.connection.select_bundle_bitstreams(item_id) do |bitstream_results|
+        next_dspace.connection.select_bundle_bitstreams(replaced_item_id) do |bitstream_results|
 
           bitstream_results.each do |bitstream_row|
 
             bundle_id = bitstream_row.values_at('bundle_id').first
-            primary_bitstream_id = bitstream_row['primary_bitstream_id']
 
-            if persisted_bundles.key?(bundle_id)
-              new_bundle_id = persisted_bundles[bundle_id]
-            else
-              new_bundle_id = next_dspace.connection.select_new_bundle_id
-              bundle_values = [ new_bundle_id ]
-              bundle_values << primary_bitstream_id
-              next_dspace.connection.insert_bundle(new_item_id, *bundle_values)
-              logger.info "Created the new bundle #{new_bundle_id}..."
+            if !persisted_bundles.key?(bundle_id)
+              next_dspace.connection.update_bundle(new_item_id, replaced_item_id)
+              logger.info "Updated the bundle for #{new_item_id} from #{replaced_item_id}..."
 
-              next_dspace.connection.update_resource_policies(bundle_id, new_bundle_id)
-              logger.info "Updated the authorization policies for the new bundle #{new_bundle_id}..."
-
-              persisted_bundles[bundle_id] = new_bundle_id
+              persisted_bundles[bundle_id] = bundle_id
             end
-
-            bitstream_id = bitstream_row['bitstream_id']
-            bitstream_order = bitstream_row.values_at('bitstream_order').first
-            new_bitstream_id = next_dspace.connection.select_new_bitstream_id
-
-            bitstream_values = [new_bitstream_id]
-            # I may need to use the internal_id, store_number, and sequence_id from the replaced Item
-            bitstream_values += bitstream_row.values_at('bitstream_format_id', 'checksum', 'checksum_algorithm', 'internal_id', 'deleted', 'store_number', 'sequence_id', 'size_bytes')
-
-            next_dspace.connection.insert_bitstream(new_bundle_id, new_bitstream_id, bitstream_order, *bitstream_values)
-            logger.info "Created the new bitstream #{new_bitstream_id}..."
-            next_dspace.connection.update_resource_policies(bitstream_id, new_bitstream_id)
-            logger.info "Updating the authorization policies for the new bitstream #{new_bitstream_id}..."
           end
         end
 
@@ -170,13 +165,27 @@ class Dspace < Thor
         next_dspace.connection.update_workspace_item(new_item_id, replaced_item_id)
         logger.info "Updated the workspace items for #{new_item_id}..."
 
-        if !deleted_items.include?(replaced_item_id)
-          next_dspace.connection.delete_item(replaced_item_id)
-          logger.info "Deleting the replaced Item #{replaced_item_id}..."
-          deleted_items << replaced_item_id
+        while !item_deletion_queue.empty?
+          deleted_item_id = item_deletion_queue.shift
+
+          if !deleted_items.include?(deleted_item_id)
+            # Deleting Metadata rows
+            next_dspace.connection.delete_metadata_values(deleted_item_id)
+            logger.info "Deleting the old metadata values for #{deleted_item_id}..."
+
+            begin
+              next_dspace.connection.delete_item(deleted_item_id)
+              logger.info "Deleting the replaced Item #{deleted_item_id}..."
+            rescue StandardError => error
+              logger.warn "Failed to delete Item #{deleted_item_id}: #{error}"
+            end
+
+            deleted_items << deleted_item_id
+          end
         end
       end
     end
+
   end
 
   no_commands do

@@ -72,10 +72,7 @@ module CLI
       def find_by_title_metadata(title)
         select_statement = build_select_item_by_title_query
         rows = execute_statement(select_statement, title)
-        return if rows.to_a.empty?
-
-        row = rows.first
-        row['item_id']
+        rows.to_a.map { |row| row['item_id'] }
       end
 
       def build_select_title_by_item_query
@@ -91,7 +88,6 @@ module CLI
       def insert_item(*item_values)
         statement = build_insert_item_statement
         execute_statement(statement, *item_values)
-        item_id = select_new_item_id
       end
 
       def build_select_new_metadata_value_id
@@ -146,7 +142,7 @@ module CLI
 
       def build_select_items_by_metadata_query
         <<-SQL
-        SELECT i2.item_id, i2.submitter_id, i2.in_archive, i2.withdrawn, i2.owning_collection, i2.last_modified, i2.discoverable, r2.element, r2.qualifier, v2.metadata_field_id,v2.text_value, v2.text_lang, v2.resource_type_id FROM item AS i2 INNER JOIN metadatavalue AS v2 ON v2.resource_id=i2.item_id INNER JOIN metadatafieldregistry AS r2 ON v2.metadata_field_id=r2.metadata_field_id INNER JOIN metadataschemaregistry AS schema2 ON schema2.metadata_schema_id=r2.metadata_schema_id WHERE i2.item_id IN (SELECT i.item_id FROM item AS i INNER JOIN metadatavalue AS v ON v.resource_id=i.item_id INNER JOIN metadatafieldregistry AS r ON v.metadata_field_id=r.metadata_field_id INNER JOIN metadataschemaregistry AS schema ON schema.metadata_schema_id=r.metadata_schema_id WHERE v.text_value=$4 AND v.resource_type_id=2 AND schema.short_id=$1 AND r.element=$2 AND r.qualifier=$3)
+        SELECT i2.item_id, i2.submitter_id, i2.in_archive, i2.withdrawn, i2.owning_collection, i2.last_modified, i2.discoverable, schema2.short_id, r2.element, r2.qualifier, v2.metadata_field_id,v2.text_value, v2.text_lang, v2.resource_type_id FROM item AS i2 INNER JOIN metadatavalue AS v2 ON v2.resource_id=i2.item_id INNER JOIN metadatafieldregistry AS r2 ON v2.metadata_field_id=r2.metadata_field_id INNER JOIN metadataschemaregistry AS schema2 ON schema2.metadata_schema_id=r2.metadata_schema_id WHERE i2.item_id IN (SELECT i.item_id FROM item AS i INNER JOIN metadatavalue AS v ON v.resource_id=i.item_id INNER JOIN metadatafieldregistry AS r ON v.metadata_field_id=r.metadata_field_id INNER JOIN metadataschemaregistry AS schema ON schema.metadata_schema_id=r.metadata_schema_id WHERE v.text_value=$4 AND v.resource_type_id=2 AND schema.short_id=$1 AND r.element=$2 AND r.qualifier=$3)
         SQL
       end
 
@@ -178,8 +174,12 @@ module CLI
         "INSERT into bundle (bundle_id, primary_bitstream_id) VALUES ($1, $2)"
       end
 
-      def build_update_bundle_statement
+      def build_insert_item_to_bundle_statement
         "INSERT INTO item2bundle (id, item_id, bundle_id) VALUES ($1, $2, $3)"
+      end
+
+      def build_update_item_to_bundle_statement
+        "UPDATE item2bundle SET item_id=$1 WHERE item_id=$2"
       end
 
       def build_select_new_bundle_id
@@ -204,15 +204,19 @@ module CLI
         row.values_at('id').first.to_i + 1
       end
 
+      def update_bundle(next_item_id, prev_item_id)
+        update_statement = build_update_item_to_bundle_statement
+        execute_statement(update_statement, next_item_id, prev_item_id)
+      end
+
       def insert_bundle(next_item_id, *bundle_values)
         bundle_id = bundle_values.first
         insert_statement = build_insert_bundle_statement
         execute_statement(insert_statement, *bundle_values)
 
         next_item_to_bundle_id = select_next_item_to_bundle_id
-        update_statement = build_update_bundle_statement
-        execute_statement(update_statement, next_item_to_bundle_id, next_item_id, bundle_id)
-        new_bundle_id = select_new_bundle_id
+        insert_i2b_statement = build_insert_item_to_bundle_statement
+        execute_statement(insert_i2b_statement, next_item_to_bundle_id, next_item_id, bundle_id)
       end
 
       def build_insert_bitstream_statement
@@ -252,8 +256,6 @@ module CLI
         update_statement = build_update_bitstream_statement
         new_bundle_to_bitstream_id = select_new_bundle_to_bitstream_id
         execute_statement(update_statement, new_bundle_to_bitstream_id, bundle_id, bitstream_id, bitstream_order)
-
-        bitstream_id = select_new_bitstream_id
       end
 
       def build_update_handle_statement
