@@ -1,0 +1,10 @@
+source_database:
+  host: 'localhost'
+  port: 5432
+  name: 'database'
+  user: 'user'
+destination_database:
+  host: 'localhost'
+  port: 5432
+  name: 'database'
+  user: 'user'

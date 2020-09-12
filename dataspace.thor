@@ -1,15 +1,16 @@
-
-require_relative 'cli/dspace'
+require_relative 'cli/dspace/repository'
+require 'thor'
 
 class Dataspace < Thor
+  # Source database
   option :db_host, type: :string
   option :db_port, type: :string
   option :db_name, type: :string
   option :db_user, type: :string
   option :class_year, type: :string
-  desc "Retrieve the 2020 student theses Items"
+  desc "student_theses_migrate", "Migrate the student theses DataSpace Items"
 
-  def migrate_student_theses
+  def student_theses_migrate
     db_host_env = ENV.fetch('PGHOST', 'localhost')
     db_port_env = ENV.fetch('PGPORT', 5432)
     db_name_env = ENV.fetch('PGDATABASE', 'database')
@@ -22,8 +23,8 @@ class Dataspace < Thor
     db_user = option.fetch(:db_user, db_user_env)
     class_year = option.fetch(:class_year, '2020')
 
-    prev_dspace = DSpace.new(db_host, db_port, db_name, db_user, db_password)
-    next_dspace = DSpace.new(db_host, db_port, db_name, db_user, db_password)
+    prev_dspace = DSpace::Repository.new(db_host, db_port, db_name, db_user, db_password)
+    next_dspace = DSpace::Repository.new(db_host, db_port, db_name, db_user, db_password)
     persisted_items = {}
 
     prev_dspace.select_items(class_year) do |rows|
@@ -99,10 +100,6 @@ class Dataspace < Thor
     end
 
   end
-
-  no_commands do
-    
-      end
-
-
 end
+
+Dataspace.start(ARGV)
