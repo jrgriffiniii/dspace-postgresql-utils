@@ -45,6 +45,29 @@ module CLI
         row.values_at('item_id').first.to_i + 1
       end
 
+      def build_select_item_by_title_query
+        "SELECT i.item_id FROM item as i INNER JOIN metadatavalue AS v ON v.resource_id=i.item_id INNER JOIN metadatafieldregistry AS r ON r.metadata_field_id=v.metadata_field_id WHERE r.metadata_schema_id=1 AND r.element='title' AND r.qualifier IS NULL AND v.text_value=$1"
+      end
+
+      def find_by_title_metadata(title)
+        select_statement = build_select_item_by_title_query
+        rows = execute_statement(select_statement, title)
+        return if rows.to_a.empty?
+
+        row = rows.first
+        row['item_id']
+      end
+
+      def build_select_title_by_item_query
+        "SELECT v.text_value FROM item as i INNER JOIN metadatavalue AS v ON v.resource_id=i.item_id INNER JOIN metadatafieldregistry AS r ON r.metadata_field_id=v.metadata_field_id WHERE r.metadata_schema_id=1 AND r.element='title' AND r.qualifier IS NULL AND i.item_id=$1"
+      end
+
+      def find_titles_by_item_id(item_id)
+        select_statement = build_select_title_by_item_query
+        rows = execute_statement(select_statement, item_id)
+        rows.to_a.map { |row| row['text_value'] }
+      end
+
       def insert_item(*item_values)
         statement = build_insert_item_statement
         execute_statement(statement, *item_values)

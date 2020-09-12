@@ -34,6 +34,7 @@ class Dataspace < Thor
     prev_dspace = CLI::DSpace::Repository.new(db_host, db_port, db_name, db_user, db_password)
     next_dspace = CLI::DSpace::Repository.new(dest_db_host, dest_db_port, dest_db_name, dest_db_user, dest_db_password)
     persisted_items = {}
+    replaced_items = {}
 
     prev_dspace.connection.select_items(class_year) do |result|
       result.each do |row|
@@ -63,8 +64,24 @@ class Dataspace < Thor
         next_dspace.connection.insert_metadata_value(*metadata_value_values)
         logger.info "Created metadata value #{new_metadata_value_id}..."
 
+        # Find the old Item by metadata
+        item_titles = prev_dspace.connection.find_titles_by_item_id(item_id)
+
+        if replaced_items.key?(item_id)
+          replaced_item_id = replaced_items[item_id]
+        else
+          item_titles.each do |item_title|
+            results = next_dspace.connection.find_by_title_metadata(item_title)
+            replaced_item_id = results unless results.nil?
+          end
+
+          raise "Failed to find the matching Item for #{item_id}" if replaced_item_id.nil?
+
+          replaced_items[item_id] = replaced_item_id
+        end
+
         # Deleting Metadata rows
-        next_dspace.connection.delete_metadata_values(item_id)
+        next_dspace.connection.delete_metadata_values(replaced_item_id)
 
         # Query for the community and collection
         persisted_communities = {}
@@ -73,19 +90,19 @@ class Dataspace < Thor
             community_id = collection_row.values_at('community_id').first
 
             if !persisted_communities.key?(community_id)
-              next_dspace.connection.update_community(new_item_id, item_id)
+              next_dspace.connection.update_community(new_item_id, replaced_item_id)
               logger.info "Updated the community membership for #{new_item_id}"
 
               persisted_communities[community_id] = community_id
             end
 
-            next_dspace.connection.update_collection(new_item_id, item_id)
+            next_dspace.connection.update_collection(new_item_id, replaced_item_id)
             logger.info "Updated the collection membership for #{new_item_id}"
           end
         end
 
         # Update the Item policies
-        next_dspace.connection.update_resource_policies(new_item_id, item_id)
+        next_dspace.connection.update_resource_policies(new_item_id, replaced_item_id)
         logger.info "Updated the Item authorization policies for #{new_item_id}..."
 
         persisted_bundles = {}
@@ -127,15 +144,15 @@ class Dataspace < Thor
         end
 
         # Migrate the handles
-        next_dspace.connection.update_handle(new_item_id, item_id)
+        next_dspace.connection.update_handle(new_item_id, replaced_item_id)
         logger.info "Updated the handles for #{new_item_id}..."
 
         # Migrate the workflow item
-        next_dspace.connection.update_workflow_item(new_item_id, item_id)
+        next_dspace.connection.update_workflow_item(new_item_id, replaced_item_id)
         logger.info "Updated the workflow items for #{new_item_id}..."
 
         # Migrate the workspace item
-        next_dspace.connection.update_workspace_item(new_item_id, item_id)
+        next_dspace.connection.update_workspace_item(new_item_id, replaced_item_id)
         logger.info "Updated the workspace items for #{new_item_id}..."
       end
     end
