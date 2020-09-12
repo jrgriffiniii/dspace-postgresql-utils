@@ -144,13 +144,16 @@ module CLI
         @connection = build_connection
       end
 
-      def build_select_items_query
-        "SELECT item.item_id, item.submitter_id, item.in_archive, item.withdrawn, item.owning_collection, item.last_modified, item.discoverable, r2.element, r2.qualifier, metadatavalue.metadata_field_id, metadatavalue.text_value, metadatavalue.text_lang, metadatavalue.resource_type_id FROM item INNER JOIN metadatavalue ON metadatavalue.resource_id=item.item_id INNER JOIN metadatafieldregistry AS r2 ON metadatavalue.metadata_field_id=r2.metadata_field_id WHERE (metadatavalue.resource_type_id=2 AND r2.element='title') and item.item_id in (select i.item_id from item as i inner join metadatavalue as v on v.resource_id=i.item_id inner join metadatafieldregistry as r on v.metadata_field_id=r.metadata_field_id where r.element = 'date' and r.qualifier='classyear' and v.text_value=$1 and v.resource_type_id=2)"
+      def build_select_items_by_metadata_query
+        <<-SQL
+        SELECT i2.item_id, i2.submitter_id, i2.in_archive, i2.withdrawn, i2.owning_collection, i2.last_modified, i2.discoverable, r2.element, r2.qualifier, v2.metadata_field_id,v2.text_value, v2.text_lang, v2.resource_type_id FROM item AS i2 INNER JOIN metadatavalue AS v2 ON v2.resource_id=i2.item_id INNER JOIN metadatafieldregistry AS r2 ON v2.metadata_field_id=r2.metadata_field_id INNER JOIN metadataschemaregistry AS schema2 ON schema2.metadata_schema_id=r2.metadata_schema_id WHERE i2.item_id IN (SELECT i.item_id FROM item AS i INNER JOIN metadatavalue AS v ON v.resource_id=i.item_id INNER JOIN metadatafieldregistry AS r ON v.metadata_field_id=r.metadata_field_id INNER JOIN metadataschemaregistry AS schema ON schema.metadata_schema_id=r.metadata_schema_id WHERE v.text_value=$4 AND v.resource_type_id=2 AND schema.short_id=$1 AND r.element=$2 AND r.qualifier=$3)
+        SQL
       end
 
-      def select_items(class_year)
-        query = build_select_items_query
-        yield execute_statement(query, class_year)
+      def select_items_by_metadata(metadata_field, metadata_value)
+        query = build_select_items_by_metadata_query
+        schema_name, metadata_field_element, metadata_field_qualifier = metadata_field.split('.')
+        yield execute_statement(query, schema_name, metadata_field_element, metadata_field_qualifier, metadata_value)
       end
 
       def build_update_resource_policies_statement

@@ -7,13 +7,14 @@ require 'pry-byebug'
 
 require_relative 'cli/dspace/repository'
 
-class Dataspace < Thor
+class Dspace < Thor
+  option :metadata_field, type: :string, required: true, aliases: '-f'
+  option :metadata_value, type: :string, required: true, aliases: '-v'
   option :config_file_path, type: :string, aliases: '-c'
-  option :class_year, type: :string, aliases: '-y'
 
-  desc "student_theses_migrate", "Migrate the student theses DataSpace Items"
+  desc "migrate_items_by_metadata", "Migrate a set of Items between DSpace grouped by a specific metadata field and value"
 
-  def student_theses_migrate
+  def migrate_items_by_metadata
     config_file_path = options.fetch(:config_file, File.join(File.dirname(__FILE__), 'config', 'databases.yml'))
     config = build_configuration(config_file_path)
 
@@ -29,23 +30,47 @@ class Dataspace < Thor
     dest_db_user = config.destination_database.user
     dest_db_password = config.destination_database.password
 
-    class_year = options.fetch(:class_year, '2020')
+    metadata_field = options.fetch(:metadata_field, 'dc.title')
+    metadata_value = options[:metadata_value]
 
     prev_dspace = CLI::DSpace::Repository.new(db_host, db_port, db_name, db_user, db_password)
     next_dspace = CLI::DSpace::Repository.new(dest_db_host, dest_db_port, dest_db_name, dest_db_user, dest_db_password)
     persisted_items = {}
     replaced_items = {}
     deleted_items = []
+    unmatched_items = []
 
-    prev_dspace.connection.select_items(class_year) do |result|
+    prev_dspace.connection.select_items_by_metadata(metadata_field, metadata_value) do |result|
       result.each do |row|
 
         new_item_id = next_dspace.connection.select_new_item_id
         item_values = [new_item_id]
         item_values += row.values_at('submitter_id', 'in_archive', 'owning_collection', 'last_modified')
         item_id = row.values_at('item_id').first
+        next if unmatched_items.include?(item_id)
 
         logger.info "Importing #{item_id}..."
+
+        # Find the old Item by metadata
+        item_titles = prev_dspace.connection.find_titles_by_item_id(item_id)
+
+        if replaced_items.key?(item_id)
+          replaced_item_id = replaced_items[item_id]
+        else
+          item_titles.each do |item_title|
+            results = next_dspace.connection.find_by_title_metadata(item_title)
+            replaced_item_id = results unless results.nil?
+          end
+
+          # Skip this import if the matching Item cannot be found
+          if replaced_item_id.nil?
+            logger.warn "Failed to find the matching Item for #{item_id} using the titles: #{item_titles.join(', ')}. Skipping the import..."
+            unmatched_items << item_id
+            next
+          end
+
+          replaced_items[item_id] = replaced_item_id
+        end
 
         if persisted_items.key?(item_id)
           new_item_id = persisted_items[item_id]
@@ -64,51 +89,34 @@ class Dataspace < Thor
         next_dspace.connection.insert_metadata_value(*metadata_value_values)
         logger.info "Created metadata value #{new_metadata_value_id}..."
 
-        # Find the old Item by metadata
-        item_titles = prev_dspace.connection.find_titles_by_item_id(item_id)
-
-        if replaced_items.key?(item_id)
-          replaced_item_id = replaced_items[item_id]
-        else
-          item_titles.each do |item_title|
-            results = next_dspace.connection.find_by_title_metadata(item_title)
-            replaced_item_id = results unless results.nil?
-          end
-
-          raise "Failed to find the matching Item for #{item_id}" if replaced_item_id.nil?
-
-          replaced_items[item_id] = replaced_item_id
-        end
-
         # Deleting Metadata rows
         next_dspace.connection.delete_metadata_values(replaced_item_id)
         logger.info "Deleting the old metadata values for #{replaced_item_id}..."
 
         # Query for the community and collection
-        persisted_communities = {}
-        prev_dspace.connection.select_community_collections(item_id) do |collection_results|
+        updated_collections = []
+        updated_communities = []
+        next_dspace.connection.select_community_collections(replaced_item_id) do |collection_results|
           collection_results.each do |collection_row|
             community_id = collection_row.values_at('community_id').first
 
-            if !persisted_communities.key?(community_id)
+            if !updated_communities.include?(community_id)
               next_dspace.connection.update_community(new_item_id, replaced_item_id)
-              logger.info "Updated the community membership for #{new_item_id}"
+              logger.info "Updated the community membership for #{new_item_id} from #{replaced_item_id}..."
 
-              persisted_communities[community_id] = community_id
+              updated_communities << community_id
             end
 
-            next_dspace.connection.update_collection(new_item_id, replaced_item_id)
-            logger.info "Updated the collection membership for #{new_item_id}"
+            collection_id = collection_row.values_at('collection_id').first
+            if !updated_collections.include?(collection_id)
+              next_dspace.connection.update_collection(new_item_id, replaced_item_id)
+              logger.info "Updated the collection membership for #{new_item_id} from #{replaced_item_id}..."
+
+              updated_collections << collection_id
+            end
           end
         end
 
-        if !deleted_items.include?(replaced_item_id)
-          next_dspace.connection.delete_item(replaced_item_id)
-          logger.info "Deleting the replaced Item #{replaced_item_id}..."
-          deleted_items << replaced_item_id
-        end
-
-        # Update the Item policies
         next_dspace.connection.update_resource_policies(new_item_id, replaced_item_id)
         logger.info "Updated the Item authorization policies for #{new_item_id}..."
 
@@ -118,20 +126,19 @@ class Dataspace < Thor
           bitstream_results.each do |bitstream_row|
 
             bundle_id = bitstream_row.values_at('bundle_id').first
-            primary_bitstream_id = bitstream_row.values_at('primary_bitstream_id').first
+            primary_bitstream_id = bitstream_row['primary_bitstream_id']
 
             if persisted_bundles.key?(bundle_id)
               new_bundle_id = persisted_bundles[bundle_id]
             else
-              # new_bundle_id = next_dspace.connection.insert_bundle(next_id, item_id, primary_bitstream_id)
-
               new_bundle_id = next_dspace.connection.select_new_bundle_id
               bundle_values = [ new_bundle_id ]
-              bundle_values += bitstream_row.values_at('primary_bitstream_id')
+              bundle_values << primary_bitstream_id
               next_dspace.connection.insert_bundle(new_item_id, *bundle_values)
               logger.info "Created the new bundle #{new_bundle_id}..."
 
               next_dspace.connection.update_resource_policies(bundle_id, new_bundle_id)
+              logger.info "Updated the authorization policies for the new bundle #{new_bundle_id}..."
 
               persisted_bundles[bundle_id] = new_bundle_id
             end
@@ -162,6 +169,12 @@ class Dataspace < Thor
         # Migrate the workspace item
         next_dspace.connection.update_workspace_item(new_item_id, replaced_item_id)
         logger.info "Updated the workspace items for #{new_item_id}..."
+
+        if !deleted_items.include?(replaced_item_id)
+          next_dspace.connection.delete_item(replaced_item_id)
+          logger.info "Deleting the replaced Item #{replaced_item_id}..."
+          deleted_items << replaced_item_id
+        end
       end
     end
   end
@@ -200,4 +213,4 @@ class Dataspace < Thor
   end
 end
 
-Dataspace.start(ARGV)
+Dspace.start(ARGV)

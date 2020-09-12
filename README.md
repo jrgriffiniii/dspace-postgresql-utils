@@ -12,9 +12,30 @@
 bundle install
 ```
 
-## Usage
+## Configuration
 
-Please edit the database configuration in `config/databases.yml`:
+### Preparing the Databases
+
+Retrieve a database export using the [pg_dump](https://www.postgresql.org/docs/12/app-pgdump.html) utility. Then please proceed with the following:
+
+```bash
+# The --username argument may also be your personal account, as this is the default superuser in macOS environments
+createuser --host=localhost --port=5432 --username=postgres --createdb dspace
+
+createdb dspace_staging --owner=dspace --username=dspace
+psql --host=localhost --port=5432 dspace_staging dspace < dspace_staging_export.sql
+
+createdb dspace_production --owner=dspace --username=dspace
+psql --host=localhost --port=5432 dspace_production dspace < dspace_production_export.sql
+```
+
+It may also be necessary to use [pg_restore](https://www.postgresql.org/docs/12/app-pgrestore.html) in order to restore the database from the export:
+
+```bash
+pg_restore --host=localhost --port=5432 --username=dspace --dbname=dspace_production --format=custom --no-owner --no-privileges --verbose dspace_production_export.sql.c
+```
+
+Then please edit the database configuration in `config/databases.yml`:
 
 ```yaml
 source_database:
@@ -29,16 +50,16 @@ destination_database:
   user: 'dspace'
 ```
 
-### Command-Line Interface
+### The Command-Line Interface
 
-This project uses [thor](http://whatisthor.com/) to provide a command-line interface. In order to list the available commands, please invoke the following:
+This project uses [thor](http://whatisthor.com/) to provide a CLI. In order to list the available commands, please invoke the following:
 
 ```bash
 bundle exec thor list
 ```
 
-In order to invoke a task (e. g. a collection migration task), please invoke the following:
+In order to invoke a task (e. g. an Item migration task), please invoke the following:
 
 ```bash
-bundle exec thor dataspace:student_theses_migrate -y 2020
+bundle exec thor dspace:migrate_items_by_metadata --metadata-field=pu.date.classyear --metadata-value=2020
 ```
