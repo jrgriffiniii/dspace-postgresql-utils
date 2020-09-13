@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 require 'thor'
 require 'yaml'
 require 'ostruct'
@@ -13,7 +15,7 @@ class Dspace < Thor
   option :metadata_value, type: :string, required: true, aliases: '-v'
   option :config_file_path, type: :string, aliases: '-c'
 
-  desc "migrate_items_by_metadata", "Migrate a set of Items between DSpace installations, filtered by a specific metadata field and value"
+  desc 'migrate_items_by_metadata', 'Migrate a set of Items between DSpace installations, filtered by a specific metadata field and value'
 
   def migrate_items_by_metadata
     config_file_path = options.fetch(:config_file, File.join(File.dirname(__FILE__), 'config', 'databases.yml'))
@@ -49,7 +51,7 @@ class Dspace < Thor
   option :metadata_value, type: :string, required: true, aliases: '-v'
   option :config_file_path, type: :string, aliases: '-c'
 
-  desc "migrate_item_by_metadata", "Migrate a single Item between DSpace installations, selected by a specific metadata field and value"
+  desc 'migrate_item_by_metadata', 'Migrate a single Item between DSpace installations, selected by a specific metadata field and value'
   def migrate_item_by_metadata
     config_file_path = options.fetch(:config_file, File.join(File.dirname(__FILE__), 'config', 'databases.yml'))
     config = build_configuration(config_file_path)
@@ -82,23 +84,22 @@ class Dspace < Thor
 
   no_commands do
     class Config < OpenStruct
-
       def source_database
-        ::OpenStruct.new(self.to_h[:source_database])
+        ::OpenStruct.new(to_h[:source_database])
       end
 
       def destination_database
-        ::OpenStruct.new(self.to_h[:destination_database])
+        ::OpenStruct.new(to_h[:destination_database])
       end
     end
 
     def config_file(file_path)
-      File.open(file_path, "rb")
+      File.open(file_path, 'rb')
     end
 
     def config_values(file_path)
       file = config_file(file_path)
-      YAML.load(file)
+      YAML.safe_load(file)
     end
 
     def build_configuration(file_path)
