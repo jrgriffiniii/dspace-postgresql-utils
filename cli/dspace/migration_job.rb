@@ -88,15 +88,25 @@ module CLI
           # Inserting Metadata rows
           new_metadata_value_id = @destination_repository.connection.select_new_metadata_value_id
           metadata_value_values = [new_metadata_value_id, new_item_id]
+          # One should ensure that the field in the desination repository actually *exists* before attempting to create the new metadata record
           metadata_value_values += row.values_at('metadata_field_id', 'text_value', 'text_lang', 'resource_type_id')
-          @destination_repository.connection.insert_metadata_value(*metadata_value_values)
 
           schema_name = row['short_id']
           element = row['element']
           qualifier = row['qualifier']
+
           new_metadata_field = "#{schema_name}.#{element}"
           new_metadata_field += ".#{qualifier}" unless qualifier.nil?
           new_metadata_value = row['text_value']
+
+          begin
+            @destination_repository.connection.insert_metadata_value(*metadata_value_values)
+          rescue StandardError => e
+            @logger.error "The metadata field for #{new_metadata_field} failed. Does this field exist in the registry for the destination repository?"
+            @logger.error e
+            next
+          end
+
           logger.info "Created metadata value #{new_metadata_value_id}: #{new_metadata_field}: #{new_metadata_value}..."
 
           # Query for the community and collection
