@@ -1,0 +1,143 @@
+version: 2.1
+
+jobs:
+  build:
+    parameters:
+      ruby_version:
+        type: string
+        default: 2.7.1
+    working_directory: ~/dspace-postgresql-utils
+    docker:
+      - image: circleci/ruby:<< parameters.ruby_version >>
+    steps:
+      - checkout
+      - run:
+          name: Install bundler
+          command: gem install bundler -v 2.1
+      - run:
+          name: Which bundler?
+          command: bundle -v
+      - restore_cache:
+          name: Restore bundle cache
+          key: dspace-postgresql-utils-{{ checksum "Gemfile.lock" }}
+      - run:
+          name: Install the Gem dependencies
+          command: bundle install --path vendor/bundle
+      - save_cache:
+          name: Store bundle cache
+          key: dspace-postgresql-utils-{{ checksum "Gemfile.lock" }}
+          paths:
+            - vendor/bundle
+      - persist_to_workspace:
+          root: '~/dspace-postgresql-utils'
+          paths: '*'
+  lint:
+    parameters:
+      ruby_version:
+        type: string
+        default: 2.7.1
+    working_directory: ~/dspace-postgresql-utils
+    docker:
+      - image: circleci/ruby:<< parameters.ruby_version >>
+    steps:
+      - checkout
+      - run:
+          name: Install bundler
+          command: gem install bundler -v 2.1
+      - run:
+          name: Which bundler?
+          command: bundle -v
+      - restore_cache:
+          name: Restore bundle cache
+          key: dspace-postgresql-utils-{{ checksum "Gemfile.lock" }}
+      - run:
+          name: Install the Gem dependencies
+          command: bundle install --path vendor/bundle
+      - run:
+          name: Lint the source code base
+          command: bundle exec rubocop
+      - save_cache:
+          name: Store bundle cache
+          key: dspace-postgresql-utils-{{ checksum "Gemfile.lock" }}
+          paths:
+            - vendor/bundle
+      - persist_to_workspace:
+          root: '~/dspace-postgresql-utils'
+          paths: '*'
+  test:
+    parameters:
+      ruby_version:
+        type: string
+        default: 2.7.1
+    working_directory: ~/dspace-postgresql-utils
+    docker:
+      - image: circleci/ruby:<< parameters.ruby_version >>
+    steps:
+      - checkout
+      - run:
+          name: Install bundler
+          command: gem install bundler -v 2.1
+      - run:
+          name: Which bundler?
+          command: bundle -v
+      - restore_cache:
+          name: Restore bundle cache
+          key: dspace-postgresql-utils-{{ checksum "Gemfile.lock" }}
+      - run:
+          name: Install the Gem dependencies
+          command: bundle install --path vendor/bundle
+      - run:
+          name: Test the thor CLI
+          command: bundle exec thor list
+      - save_cache:
+          name: Store bundle cache
+          key: dspace-postgresql-utils-{{ checksum "Gemfile.lock" }}
+          paths:
+            - vendor/bundle
+      - persist_to_workspace:
+          root: '~/dspace-postgresql-utils'
+          paths: '*'
+
+workflows:
+  version: 2.1
+  ci:
+    jobs:
+      - build:
+          name: build-2.7
+          ruby_version: 2.7.1
+      - build:
+          name: build-2.6
+          ruby_version: 2.6.6
+      - build:
+          name: build-2.5
+          ruby_version: 2.5.8
+      - lint:
+          name: lint-2.7
+          ruby_version: 2.7.1
+          requires:
+            - build-2.7
+      - lint:
+          name: lint-2.6
+          ruby_version: 2.6.6
+          requires:
+            - build-2.6
+      - lint:
+          name: lint-2.5
+          ruby_version: 2.5.8
+          requires:
+            - build-2.5
+      - test:
+          name: test-2.7
+          ruby_version: 2.7.1
+          requires:
+            - build-2.7
+      - test:
+          name: test-2.6
+          ruby_version: 2.6.6
+          requires:
+            - build-2.6
+      - test:
+          name: test-2.5
+          ruby_version: 2.5.8
+          requires:
+            - build-2.5
