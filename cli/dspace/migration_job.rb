@@ -107,7 +107,9 @@ module CLI
               community_id = collection_row.values_at('community_id').first
 
               unless updated_communities.include?(community_id)
-                @destination_repository.connection.update_community(new_item_id, replaced_item_id)
+
+                # This will assume that the community IDs between the two installations are identical
+                @destination_repository.connection.update_community(new_item_id, replaced_item_id, community_id)
                 logger.info "Updated the community membership for #{new_item_id} from #{replaced_item_id}..."
 
                 updated_communities << community_id
@@ -116,7 +118,8 @@ module CLI
               collection_id = collection_row.values_at('collection_id').first
               next if updated_collections.include?(collection_id)
 
-              @destination_repository.connection.update_collection(new_item_id, replaced_item_id)
+              # This will assume that the collection IDs between the two installations are identical
+              @destination_repository.connection.update_collection(new_item_id, replaced_item_id, collection_id)
               logger.info "Updated the collection membership for #{new_item_id} from #{replaced_item_id}..."
 
               updated_collections << collection_id
@@ -141,7 +144,8 @@ module CLI
           end
 
           # Migrate the handles
-          @destination_repository.connection.update_handle(new_item_id, replaced_item_id)
+          handle = row['handle']
+          @destination_repository.connection.update_handle(new_item_id, replaced_item_id, handle)
           logger.info "Updated the handles for #{new_item_id}..."
 
           # Migrate the workflow item

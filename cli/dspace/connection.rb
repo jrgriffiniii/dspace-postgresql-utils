@@ -15,21 +15,21 @@ module CLI
       end
 
       def build_update_community_statement
-        'UPDATE communities2item SET item_id=$1 WHERE item_id=$2'
+        'UPDATE communities2item SET item_id=$1 WHERE item_id=$2 AND community_id=$3'
       end
 
-      def update_community(next_item_id, item_id)
+      def update_community(next_item_id, item_id, community_id)
         statement = build_update_community_statement
-        execute_statement(statement, next_item_id, item_id)
+        execute_statement(statement, next_item_id, item_id, community_id)
       end
 
       def build_update_collection_statement
-        'UPDATE collection2item SET item_id=$1 WHERE item_id=$2'
+        'UPDATE collection2item SET item_id=$1 WHERE item_id=$2 AND collection_id=$3'
       end
 
-      def update_collection(next_item_id, item_id)
+      def update_collection(next_item_id, item_id, collection_id)
         statement = build_update_collection_statement
-        execute_statement(statement, next_item_id, item_id)
+        execute_statement(statement, next_item_id, item_id, collection_id)
       end
 
       def build_insert_item_statement
@@ -56,11 +56,31 @@ module CLI
         execute_statement(statement, item_id)
       end
 
+      def build_delete_communities_to_item_statement
+        'DELETE FROM communities2item AS c2i WHERE c2i.item_id=$1'
+      end
+
+      def delete_communities_to_item(item_id)
+        statement = build_delete_communities_to_item_statement
+        execute_statement(statement, item_id)
+      end
+
+      def build_delete_collection_to_item_statement
+        'DELETE FROM collection2item AS c2i WHERE c2i.item_id=$1'
+      end
+
+      def delete_collection_to_item(item_id)
+        statement = build_delete_collection_to_item_statement
+        execute_statement(statement, item_id)
+      end
+
       def build_delete_item_statement
         'DELETE FROM item WHERE item.item_id=$1'
       end
 
       def delete_item(item_id)
+        delete_communities_to_item(item_id)
+        delete_collection_to_item(item_id)
         delete_item_to_bundle_by_item(item_id)
 
         statement = build_delete_item_statement
@@ -144,11 +164,12 @@ module CLI
 
       def build_select_items_by_metadata_query
         <<-SQL
-        SELECT i2.item_id, i2.submitter_id, i2.in_archive, i2.withdrawn, i2.owning_collection, i2.last_modified, i2.discoverable, schema2.short_id, r2.element, r2.qualifier, v2.metadata_field_id,v2.text_value, v2.text_lang, v2.resource_type_id
+        SELECT i2.item_id, i2.submitter_id, i2.in_archive, i2.withdrawn, i2.owning_collection, i2.last_modified, i2.discoverable, schema2.short_id, r2.element, r2.qualifier, v2.metadata_field_id,v2.text_value, v2.text_lang, v2.resource_type_id, h.handle
           FROM item AS i2
           INNER JOIN metadatavalue AS v2 ON v2.resource_id=i2.item_id
           INNER JOIN metadatafieldregistry AS r2 ON v2.metadata_field_id=r2.metadata_field_id
           INNER JOIN metadataschemaregistry AS schema2 ON schema2.metadata_schema_id=r2.metadata_schema_id
+          INNER JOIN handle AS h ON h.resource_id=i2.item_id
 
           WHERE i2.item_id IN (
 
@@ -339,12 +360,12 @@ module CLI
       end
 
       def build_update_handle_statement
-        'UPDATE handle SET resource_id=$1 WHERE resource_id=$2'
+        'UPDATE handle SET resource_id=$1, handle=$3 WHERE resource_id=$2'
       end
 
-      def update_handle(next_item_id, item_id)
+      def update_handle(next_item_id, item_id, handle)
         statement = build_update_handle_statement
-        execute_statement(statement, next_item_id, item_id)
+        execute_statement(statement, next_item_id, item_id, handle)
       end
 
       def build_update_workflow_item_statement
