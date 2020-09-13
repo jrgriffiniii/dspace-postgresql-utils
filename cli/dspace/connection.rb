@@ -144,14 +144,62 @@ module CLI
 
       def build_select_items_by_metadata_query
         <<-SQL
-        SELECT i2.item_id, i2.submitter_id, i2.in_archive, i2.withdrawn, i2.owning_collection, i2.last_modified, i2.discoverable, schema2.short_id, r2.element, r2.qualifier, v2.metadata_field_id,v2.text_value, v2.text_lang, v2.resource_type_id FROM item AS i2 INNER JOIN metadatavalue AS v2 ON v2.resource_id=i2.item_id INNER JOIN metadatafieldregistry AS r2 ON v2.metadata_field_id=r2.metadata_field_id INNER JOIN metadataschemaregistry AS schema2 ON schema2.metadata_schema_id=r2.metadata_schema_id WHERE i2.item_id IN (SELECT i.item_id FROM item AS i INNER JOIN metadatavalue AS v ON v.resource_id=i.item_id INNER JOIN metadatafieldregistry AS r ON v.metadata_field_id=r.metadata_field_id INNER JOIN metadataschemaregistry AS schema ON schema.metadata_schema_id=r.metadata_schema_id WHERE v.text_value=$4 AND v.resource_type_id=2 AND schema.short_id=$1 AND r.element=$2 AND r.qualifier=$3)
+        SELECT i2.item_id, i2.submitter_id, i2.in_archive, i2.withdrawn, i2.owning_collection, i2.last_modified, i2.discoverable, schema2.short_id, r2.element, r2.qualifier, v2.metadata_field_id,v2.text_value, v2.text_lang, v2.resource_type_id
+          FROM item AS i2
+          INNER JOIN metadatavalue AS v2 ON v2.resource_id=i2.item_id
+          INNER JOIN metadatafieldregistry AS r2 ON v2.metadata_field_id=r2.metadata_field_id
+          INNER JOIN metadataschemaregistry AS schema2 ON schema2.metadata_schema_id=r2.metadata_schema_id
+
+          WHERE i2.item_id IN (
+
+            SELECT i.item_id
+              FROM item AS i
+              INNER JOIN metadatavalue AS v ON v.resource_id=i.item_id
+              INNER JOIN metadatafieldregistry AS r ON v.metadata_field_id=r.metadata_field_id
+              INNER JOIN metadataschemaregistry AS schema ON schema.metadata_schema_id=r.metadata_schema_id
+              WHERE v.text_value=$4
+                AND v.resource_type_id=2
+                AND schema.short_id=$1
+                AND r.element=$2
+                AND r.qualifier=$3
+          )
         SQL
       end
 
-      def select_items_by_metadata(metadata_field, metadata_value)
-        query = build_select_items_by_metadata_query
+      def build_select_limited_items_by_metadata_query
+        <<-SQL
+        SELECT i2.item_id, i2.submitter_id, i2.in_archive, i2.withdrawn, i2.owning_collection, i2.last_modified, i2.discoverable, schema2.short_id, r2.element, r2.qualifier, v2.metadata_field_id,v2.text_value, v2.text_lang, v2.resource_type_id
+          FROM item AS i2
+          INNER JOIN metadatavalue AS v2 ON v2.resource_id=i2.item_id
+          INNER JOIN metadatafieldregistry AS r2 ON v2.metadata_field_id=r2.metadata_field_id
+          INNER JOIN metadataschemaregistry AS schema2 ON schema2.metadata_schema_id=r2.metadata_schema_id
+
+          WHERE i2.item_id IN (
+
+            SELECT i.item_id
+              FROM item AS i
+              INNER JOIN metadatavalue AS v ON v.resource_id=i.item_id
+              INNER JOIN metadatafieldregistry AS r ON v.metadata_field_id=r.metadata_field_id
+              INNER JOIN metadataschemaregistry AS schema ON schema.metadata_schema_id=r.metadata_schema_id
+              WHERE v.text_value=$4
+                AND v.resource_type_id=2
+                AND schema.short_id=$1
+                AND r.element=$2
+                AND r.qualifier=$3
+              LIMIT $5
+          )
+        SQL
+      end
+
+      def select_items_by_metadata(metadata_field, metadata_value, limit = nil)
         schema_name, metadata_field_element, metadata_field_qualifier = metadata_field.split('.')
-        execute_statement(query, schema_name, metadata_field_element, metadata_field_qualifier, metadata_value)
+        if limit.nil?
+          query = build_select_items_by_metadata_query
+          execute_statement(query, schema_name, metadata_field_element, metadata_field_qualifier, metadata_value)
+        else
+          query = build_select_limited_items_by_metadata_query
+          execute_statement(query, schema_name, metadata_field_element, metadata_field_qualifier, metadata_value, limit)
+        end
       end
 
       def build_select_item_by_metadata_query

@@ -4,11 +4,15 @@ module CLI
   module DSpace
     class MigrationJob
       attr_accessor :query_results
+      attr_reader :migrated_items, :deleted_items
 
       def initialize(source_repository:, destination_repository:)
         @source_repository = source_repository
         @destination_repository = destination_repository
         @query_results = []
+
+        @migrated_items = []
+        @deleted_items = []
       end
 
       def perform
@@ -29,7 +33,6 @@ module CLI
         unmatched_items = []
         duplicated_items = []
         item_deletion_queue = []
-        deleted_items = []
 
         rows = query_results.to_a
 
@@ -148,12 +151,14 @@ module CLI
           # Migrate the workspace item
           @destination_repository.connection.update_workspace_item(new_item_id, replaced_item_id)
           logger.info "Updated the workspace items for #{new_item_id}..."
+
+          @migrated_items << new_item_id unless @migrated_items.include?(new_item_id)
         end
 
         until item_deletion_queue.empty?
           deleted_item_id = item_deletion_queue.shift
 
-          next if deleted_items.include?(deleted_item_id)
+          next if @deleted_items.include?(deleted_item_id)
 
           # Deleting Metadata rows
           @destination_repository.connection.delete_metadata_values(deleted_item_id)
@@ -166,7 +171,7 @@ module CLI
             logger.warn "Failed to delete Item #{deleted_item_id}: #{e}"
           end
 
-          deleted_items << deleted_item_id
+          @deleted_items << deleted_item_id
         end
       end
     end

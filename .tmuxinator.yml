@@ -57,5 +57,5 @@ windows:
   - postgresql:
       layout: even-horizontal
       panes:
-        - cd database_exports; psql dspace_staging
-        - cd database_exports; psql dspace_production
+        - cd database_exports; psql dspace_staging dspace
+        - cd database_exports; psql dspace_production dspace
