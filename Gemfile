@@ -4,6 +4,7 @@ source 'https://rubygems.org/'
 
 gem 'pg'
 gem 'thor'
+gem 'yard'
 
 group :development do
   gem 'pry-byebug'
