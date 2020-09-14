@@ -89,6 +89,9 @@ jobs:
       - run:
           name: Test the thor CLI
           command: bundle exec thor list
+      - run:
+          name: Generate the documentation
+          command: bundle exec yard doc
       - save_cache:
           name: Store bundle cache
           key: dspace-postgresql-utils-{{ checksum "Gemfile.lock" }}

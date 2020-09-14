@@ -50,6 +50,8 @@ destination_database:
   user: 'dspace'
 ```
 
+## Running the Utilities
+
 ### The Command-Line Interface
 
 This project uses [thor](http://whatisthor.com/) to provide a CLI. In order to list the available commands, please invoke the following:
@@ -62,4 +64,15 @@ In order to invoke a task (e. g. an Item migration task), please invoke the foll
 
 ```bash
 bundle exec thor dspace:migrate_items_by_metadata --metadata-field=pu.date.classyear --metadata-value=2020
+```
+
+## Development
+
+### Generating Documentation
+
+This project uses [yard](https://yardoc.org/) to generate documentation for the source code base. In order to generate this locally, please invoke the following:
+
+```
+bundle exec yard doc
+open doc/index.html
 ```
