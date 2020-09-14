@@ -16,6 +16,10 @@ module CLI
       def connection
         @connection ||= Connection.new(dbname: @db_name, host: @db_host, port: @db_port, user: @db_user, password: @db_password)
       end
+
+      def database_uri
+        connection.database_uri
+      end
     end
   end
 end

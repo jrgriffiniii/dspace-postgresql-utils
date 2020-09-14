@@ -102,6 +102,7 @@ Layout/LineLength:
     - cli/dspace/repository.rb
 Metrics/BlockLength:
   Exclude:
+    - dspace.thor
     - cli/dspace/migration_job.rb
 Metrics/ClassLength:
   Exclude:
@@ -111,3 +112,4 @@ Metrics/MethodLength:
   Exclude:
     - dspace.thor
     - cli/dspace/migration_job.rb
+    - cli/dspace/migration_report.rb

@@ -4,7 +4,7 @@ module CLI
   module DSpace
     class MigrationJob
       attr_accessor :query_results
-      attr_reader :migrated_items, :deleted_item_queue, :missing_items, :duplicated_items
+      attr_reader :deleted_item_queue, :missing_items, :duplicated_items
 
       def initialize(source_repository:, destination_repository:)
         @source_repository = source_repository
@@ -12,6 +12,7 @@ module CLI
         @query_results = []
 
         @migrated_items = []
+        @deletions = {}
         @deleted_item_queue = []
 
         @missing_items = []
@@ -23,6 +24,34 @@ module CLI
 
       def perform
         migrate_from_query_results
+      end
+
+      def migrated?(item_id)
+        @migrations.key?(item_id)
+      end
+
+      def replaced?(item_id)
+        @replacements.key?(item_id)
+      end
+
+      def deleted?(item_id)
+        @deletions.key?(item_id)
+      end
+
+      def migrated_source_items
+        @migrations.keys
+      end
+
+      def migrated_destination_items
+        @migrations.values
+      end
+
+      def replaced_items
+        @replacements.values
+      end
+
+      def deleted_items
+        @deletions.keys
       end
 
       private
@@ -65,14 +94,6 @@ module CLI
 
       def find_replacement_for(replaced_item_id)
         @replacements[replaced_item_id]
-      end
-
-      def migrated?(item_id)
-        @migrations.key?(item_id)
-      end
-
-      def replaced?(item_id)
-        @replacements.key?(item_id)
       end
 
       def migrate_from_query_results
@@ -203,8 +224,10 @@ module CLI
             @destination_repository.connection.delete_item(deleted_item_id)
             logger.info "Deleting the replaced Item #{deleted_item_id}..."
 
+            new_item_id = find_replacement_for(deleted_item_id)
+            @deletions[deleted_item_id] = new_item_id
+
             # Should there be a collision, the ID for the Item in the destination system should be updated first
-            # new_item_id = find_replacement_for(deleted_item_id)
             # @destination_repository.connection.update_item_id(new_item_id, deleted_item_id)
           rescue StandardError => e
             logger.error "Failed to delete Item #{deleted_item_id}: #{e}"
