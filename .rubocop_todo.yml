@@ -28,6 +28,7 @@ Style/Documentation:
     - 'test/**/*'
     - 'cli/dspace/connection.rb'
     - 'cli/dspace/migration_job.rb'
+    - 'cli/dspace/migration_report.rb'
     - 'cli/dspace/repository.rb'
     - 'dspace.thor'
 

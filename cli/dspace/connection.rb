@@ -407,6 +407,10 @@ module CLI
         execute_statement(statement, next_item_id, item_id)
       end
 
+      def database_uri
+        "postgresql://#{@host}:#{@port}/#{@dbname}"
+      end
+
       private
 
       def execute_statement(statement, *params)
