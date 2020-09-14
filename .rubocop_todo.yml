@@ -9,17 +9,17 @@
 # Offense count: 3
 # Configuration parameters: IgnoredMethods.
 Metrics/AbcSize:
-  Max: 126
+  Max: 130
 
 # Offense count: 1
 # Configuration parameters: IgnoredMethods.
 Metrics/CyclomaticComplexity:
-  Max: 19
+  Max: 21
 
 # Offense count: 1
 # Configuration parameters: IgnoredMethods.
 Metrics/PerceivedComplexity:
-  Max: 22
+  Max: 24
 
 # Offense count: 5
 Style/Documentation:
