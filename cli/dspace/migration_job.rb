@@ -4,7 +4,7 @@ module CLI
   module DSpace
     class MigrationJob
       attr_accessor :query_results
-      attr_reader :migrated_items, :deleted_items
+      attr_reader :migrated_items, :deleted_item_queue, :missing_items, :duplicated_items
 
       def initialize(source_repository:, destination_repository:)
         @source_repository = source_repository
@@ -12,7 +12,13 @@ module CLI
         @query_results = []
 
         @migrated_items = []
-        @deleted_items = []
+        @deleted_item_queue = []
+
+        @missing_items = []
+        @duplicated_items = []
+
+        @migrations = {}
+        @replacements = {}
       end
 
       def perform
@@ -27,28 +33,62 @@ module CLI
         logger
       end
 
-      def migrate_from_query_results
-        persisted_items = {}
-        replaced_items = {}
-        unmatched_items = []
-        duplicated_items = []
-        item_deletion_queue = []
+      def create_migration(source:, replaced:, **item_values)
+        item_id = source
+        replaced_item_id = replaced
+        new_item_id = item_values['item_id']
 
+        if migrated?(item_id)
+          logger.info "Updating #{item_id}..."
+        else
+          logger.info "Importing #{item_id}..."
+          logger.info "Creating a new Item for #{item_id}..."
+
+          row_values = [new_item_id]
+          row_values += item_values.values_at('submitter_id', 'in_archive', 'owning_collection', 'last_modified')
+
+          @destination_repository.connection.insert_item(*row_values)
+
+          @migrations[item_id] = new_item_id
+          @replacements[replaced_item_id] = new_item_id
+          logger.info "Created #{new_item_id}..."
+
+          @deleted_item_queue << replaced_item_id
+        end
+
+        new_item_id
+      end
+
+      def find_migration_for(source_item_id)
+        @migrations[source_item_id]
+      end
+
+      def find_replacement_for(replaced_item_id)
+        @replacements[replaced_item_id]
+      end
+
+      def migrated?(item_id)
+        @migrations.key?(item_id)
+      end
+
+      def replaced?(item_id)
+        @replacements.key?(item_id)
+      end
+
+      def migrate_from_query_results
         rows = query_results.to_a
 
         rows.each do |row|
-          new_item_id = @destination_repository.connection.select_new_item_id
-          item_values = [new_item_id]
-          item_values += row.values_at('submitter_id', 'in_archive', 'owning_collection', 'last_modified')
           item_id = row['item_id']
-          next if unmatched_items.include?(item_id)
-          next if duplicated_items.include?(item_id)
+
+          next if @missing_items.include?(item_id)
+          next if @duplicated_items.include?(item_id)
 
           # Find the old Item by metadata
           item_titles = @source_repository.connection.find_titles_by_item_id(item_id)
 
-          if replaced_items.key?(item_id)
-            replaced_item_id = replaced_items[item_id]
+          if replaced?(item_id)
+            replaced_item_id = @replacements[item_id]
           else
             replaced_item_ids = []
             item_titles.each do |item_title|
@@ -59,55 +99,50 @@ module CLI
             # Skip this import if the matching Item cannot be found
             if replaced_item_ids.empty?
               logger.warn "Failed to find the matching Item for #{item_id} using the titles: #{item_titles.join(', ')}. Skipping the import..."
-              unmatched_items << item_id
+              @missing_items << item_id
               next
             elsif replaced_item_ids.length > 1
               logger.warn "Found multiple matching Items for #{item_id} using the titles: #{item_titles.join(', ')}. Skipping the import..."
-              duplicated_items << item_id
+              @duplicated_items << item_id
               next
             end
 
             replaced_item_id = replaced_item_ids.first
-            replaced_items[item_id] = replaced_item_id
+            @replacements[item_id] = replaced_item_id
           end
 
-          if persisted_items.key?(item_id)
-            logger.info "Updating #{item_id}..."
-            new_item_id = persisted_items[item_id]
-          else
-            logger.info "Importing #{item_id}..."
-            logger.info "Creating a new Item for #{item_id}..."
-            @destination_repository.connection.insert_item(*item_values)
+          new_item_id = @destination_repository.connection.select_new_item_id
+          item_values = row.to_h
+          item_values['item_id'] = new_item_id
 
-            persisted_items[item_id] = new_item_id
-            logger.info "Created #{new_item_id}..."
-
-            item_deletion_queue << replaced_item_id
-          end
+          new_item_id = create_migration(source: item_id, replaced: replaced_item_id, **item_values)
 
           # Inserting Metadata rows
-          new_metadata_value_id = @destination_repository.connection.select_new_metadata_value_id
-          metadata_value_values = [new_metadata_value_id, new_item_id]
+          metadata_value_values = [new_item_id]
           metadata_value_values += row.values_at('metadata_field_id', 'text_value', 'text_lang', 'resource_type_id')
           @destination_repository.connection.insert_metadata_value(*metadata_value_values)
 
           schema_name = row['short_id']
           element = row['element']
           qualifier = row['qualifier']
+
           new_metadata_field = "#{schema_name}.#{element}"
           new_metadata_field += ".#{qualifier}" unless qualifier.nil?
+
           new_metadata_value = row['text_value']
-          logger.info "Created metadata value #{new_metadata_value_id}: #{new_metadata_field}: #{new_metadata_value}..."
+          logger.info "Created metadata value for #{new_item_id}: #{new_metadata_field}: #{new_metadata_value}..."
 
           # Query for the community and collection
           updated_collections = []
           updated_communities = []
-          @destination_repository.connection.select_community_collections(replaced_item_id) do |collection_results|
+          @source_repository.connection.select_community_collections(item_id) do |collection_results|
             collection_results.each do |collection_row|
               community_id = collection_row.values_at('community_id').first
 
               unless updated_communities.include?(community_id)
-                @destination_repository.connection.update_community(new_item_id, replaced_item_id)
+
+                # This will assume that the community IDs between the two installations are identical
+                @destination_repository.connection.update_community(new_item_id, replaced_item_id, community_id)
                 logger.info "Updated the community membership for #{new_item_id} from #{replaced_item_id}..."
 
                 updated_communities << community_id
@@ -116,7 +151,8 @@ module CLI
               collection_id = collection_row.values_at('collection_id').first
               next if updated_collections.include?(collection_id)
 
-              @destination_repository.connection.update_collection(new_item_id, replaced_item_id)
+              # This will assume that the collection IDs between the two installations are identical
+              @destination_repository.connection.update_collection(new_item_id, replaced_item_id, collection_id)
               logger.info "Updated the collection membership for #{new_item_id} from #{replaced_item_id}..."
 
               updated_collections << collection_id
@@ -141,7 +177,8 @@ module CLI
           end
 
           # Migrate the handles
-          @destination_repository.connection.update_handle(new_item_id, replaced_item_id)
+          handle = row['handle']
+          @destination_repository.connection.update_handle(new_item_id, replaced_item_id, handle)
           logger.info "Updated the handles for #{new_item_id}..."
 
           # Migrate the workflow item
@@ -155,10 +192,8 @@ module CLI
           @migrated_items << new_item_id unless @migrated_items.include?(new_item_id)
         end
 
-        until item_deletion_queue.empty?
-          deleted_item_id = item_deletion_queue.shift
-
-          next if @deleted_items.include?(deleted_item_id)
+        until @deleted_item_queue.empty?
+          deleted_item_id = @deleted_item_queue.shift
 
           # Deleting Metadata rows
           @destination_repository.connection.delete_metadata_values(deleted_item_id)
@@ -167,11 +202,14 @@ module CLI
           begin
             @destination_repository.connection.delete_item(deleted_item_id)
             logger.info "Deleting the replaced Item #{deleted_item_id}..."
+
+            # Should there be a collision, the ID for the Item in the destination system should be updated first
+            # new_item_id = find_replacement_for(deleted_item_id)
+            # @destination_repository.connection.update_item_id(new_item_id, deleted_item_id)
           rescue StandardError => e
-            logger.warn "Failed to delete Item #{deleted_item_id}: #{e}"
+            logger.error "Failed to delete Item #{deleted_item_id}: #{e}"
           end
 
-          @deleted_items << deleted_item_id
         end
       end
     end

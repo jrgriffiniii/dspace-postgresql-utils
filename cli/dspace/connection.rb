@@ -15,23 +15,24 @@ module CLI
       end
 
       def build_update_community_statement
-        'UPDATE communities2item SET item_id=$1 WHERE item_id=$2'
+        'UPDATE communities2item SET item_id=$1 WHERE item_id=$2 AND community_id=$3'
       end
 
-      def update_community(next_item_id, item_id)
+      def update_community(next_item_id, item_id, community_id)
         statement = build_update_community_statement
-        execute_statement(statement, next_item_id, item_id)
+        execute_statement(statement, next_item_id, item_id, community_id)
       end
 
       def build_update_collection_statement
-        'UPDATE collection2item SET item_id=$1 WHERE item_id=$2'
+        'UPDATE collection2item SET item_id=$1 WHERE item_id=$2 AND collection_id=$3'
       end
 
-      def update_collection(next_item_id, item_id)
+      def update_collection(next_item_id, item_id, collection_id)
         statement = build_update_collection_statement
-        execute_statement(statement, next_item_id, item_id)
+        execute_statement(statement, next_item_id, item_id, collection_id)
       end
 
+      # Here one should try to preserve the Item ID from the source system
       def build_insert_item_statement
         'INSERT INTO item (item_id, submitter_id, in_archive, withdrawn, owning_collection, last_modified, discoverable) VALUES ($1, $2, $3, FALSE, $4, $5, TRUE)'
       end
@@ -56,11 +57,31 @@ module CLI
         execute_statement(statement, item_id)
       end
 
+      def build_delete_communities_to_item_statement
+        'DELETE FROM communities2item AS c2i WHERE c2i.item_id=$1'
+      end
+
+      def delete_communities_to_item(item_id)
+        statement = build_delete_communities_to_item_statement
+        execute_statement(statement, item_id)
+      end
+
+      def build_delete_collection_to_item_statement
+        'DELETE FROM collection2item AS c2i WHERE c2i.item_id=$1'
+      end
+
+      def delete_collection_to_item(item_id)
+        statement = build_delete_collection_to_item_statement
+        execute_statement(statement, item_id)
+      end
+
       def build_delete_item_statement
         'DELETE FROM item WHERE item.item_id=$1'
       end
 
       def delete_item(item_id)
+        delete_communities_to_item(item_id)
+        delete_collection_to_item(item_id)
         delete_item_to_bundle_by_item(item_id)
 
         statement = build_delete_item_statement
@@ -92,6 +113,29 @@ module CLI
         execute_statement(statement, *item_values)
       end
 
+      def build_update_item_id_statement
+        'UPDATE item SET item_id=$1 WHERE item_id=$2'
+      end
+
+      def build_update_collection_to_item_statement
+        'UPDATE collection2item SET item_id=$1 WHERE item_id=$2'
+      end
+
+      def update_collection_to_item(new_item_id, prev_item_id)
+        statement = build_update_collection_to_item_statement
+        execute_statement(statement, new_item_id, prev_item_id)
+      end
+
+      # This should be removed before the PR is merged
+      def update_item_id(item_id)
+        new_item_id = select_new_item_id
+
+        update_collection_to_item(new_item_id, item_id)
+
+        statement = build_update_item_id_statement
+        execute_statement(statement, new_item_id, item_id)
+      end
+
       def build_select_new_metadata_value_id
         'SELECT metadata_value_id FROM metadatavalue ORDER BY metadata_value_id DESC LIMIT 1'
       end
@@ -104,10 +148,18 @@ module CLI
       end
 
       def build_insert_metadata_value_statement
-        'INSERT INTO metadatavalue (metadata_value_id, resource_id, metadata_field_id, text_value, text_lang, resource_type_id) VALUES ($1, $2, $3, $4, $5, $6)'
+        'INSERT INTO metadatavalue (metadata_value_id, resource_id, metadata_field_id, text_value, text_lang, resource_type_id) VALUES (DEFAULT, $1, $2, $3, $4, $5)'
+      end
+
+      def alter_sequence_metadatavalue
+        new_id = select_new_metadata_value_id
+        statement = "ALTER SEQUENCE metadatavalue_seq RESTART WITH #{new_id}"
+        execute_statement(statement)
       end
 
       def insert_metadata_value(*metadata_values)
+        # This is a hack, I am not certain why this is needed
+        alter_sequence_metadatavalue
         statement = build_insert_metadata_value_statement
         execute_statement(statement, *metadata_values)
       end
@@ -144,50 +196,62 @@ module CLI
 
       def build_select_items_by_metadata_query
         <<-SQL
-        SELECT i2.item_id, i2.submitter_id, i2.in_archive, i2.withdrawn, i2.owning_collection, i2.last_modified, i2.discoverable, schema2.short_id, r2.element, r2.qualifier, v2.metadata_field_id,v2.text_value, v2.text_lang, v2.resource_type_id
+        SELECT i2.item_id, i2.submitter_id, i2.in_archive, i2.withdrawn, i2.owning_collection, i2.last_modified, i2.discoverable, schema2.short_id, r2.element, r2.qualifier, v2.metadata_field_id,v2.text_value, v2.text_lang, v2.resource_type_id, h.handle
           FROM item AS i2
           INNER JOIN metadatavalue AS v2 ON v2.resource_id=i2.item_id
           INNER JOIN metadatafieldregistry AS r2 ON v2.metadata_field_id=r2.metadata_field_id
           INNER JOIN metadataschemaregistry AS schema2 ON schema2.metadata_schema_id=r2.metadata_schema_id
+          INNER JOIN handle AS h ON h.resource_id=i2.item_id
 
-          WHERE i2.item_id IN (
+          WHERE v2.resource_type_id=2
+            AND i2.item_id IN (
 
-            SELECT i.item_id
-              FROM item AS i
-              INNER JOIN metadatavalue AS v ON v.resource_id=i.item_id
-              INNER JOIN metadatafieldregistry AS r ON v.metadata_field_id=r.metadata_field_id
-              INNER JOIN metadataschemaregistry AS schema ON schema.metadata_schema_id=r.metadata_schema_id
-              WHERE v.text_value=$4
-                AND v.resource_type_id=2
-                AND schema.short_id=$1
-                AND r.element=$2
-                AND r.qualifier=$3
+              SELECT i.item_id
+                FROM item AS i
+                INNER JOIN metadatavalue AS v ON v.resource_id=i.item_id
+                INNER JOIN metadatafieldregistry AS r ON v.metadata_field_id=r.metadata_field_id
+                INNER JOIN metadataschemaregistry AS schema ON schema.metadata_schema_id=r.metadata_schema_id
+                WHERE v.text_value=$4
+                  AND v.resource_type_id=2
+                  AND schema.short_id=$1
+                  AND r.element=$2
+                  AND r.qualifier=$3
           )
         SQL
       end
 
       def build_select_limited_items_by_metadata_query
         <<-SQL
-        SELECT i2.item_id, i2.submitter_id, i2.in_archive, i2.withdrawn, i2.owning_collection, i2.last_modified, i2.discoverable, schema2.short_id, r2.element, r2.qualifier, v2.metadata_field_id,v2.text_value, v2.text_lang, v2.resource_type_id
-          FROM item AS i2
-          INNER JOIN metadatavalue AS v2 ON v2.resource_id=i2.item_id
-          INNER JOIN metadatafieldregistry AS r2 ON v2.metadata_field_id=r2.metadata_field_id
-          INNER JOIN metadataschemaregistry AS schema2 ON schema2.metadata_schema_id=r2.metadata_schema_id
+        SELECT i3.item_id, i3.submitter_id, i3.in_archive, i3.withdrawn, i3.owning_collection, i3.last_modified, i3.discoverable, schema3.short_id, r3.element, r3.qualifier, v3.metadata_field_id, v3.text_value, v3.text_lang, v3.resource_type_id
+          FROM item AS i3
+          INNER JOIN metadatavalue AS v3 ON v3.resource_id=i3.item_id
+          INNER JOIN metadatafieldregistry AS r3 ON v3.metadata_field_id=r3.metadata_field_id
+          INNER JOIN metadataschemaregistry AS schema3 ON schema3.metadata_schema_id=r3.metadata_schema_id
 
-          WHERE i2.item_id IN (
+          WHERE i3.item_id in (
+            SELECT distinct(i2.item_id)
+              FROM item AS i2
+              INNER JOIN metadatavalue AS v2 ON v2.resource_id=i2.item_id
 
-            SELECT i.item_id
-              FROM item AS i
-              INNER JOIN metadatavalue AS v ON v.resource_id=i.item_id
-              INNER JOIN metadatafieldregistry AS r ON v.metadata_field_id=r.metadata_field_id
-              INNER JOIN metadataschemaregistry AS schema ON schema.metadata_schema_id=r.metadata_schema_id
-              WHERE v.text_value=$4
-                AND v.resource_type_id=2
-                AND schema.short_id=$1
-                AND r.element=$2
-                AND r.qualifier=$3
-              LIMIT $5
-          )
+              WHERE v2.resource_type_id=2
+                AND i2.item_id IN (
+
+                  SELECT i.item_id
+                    FROM item AS i
+                    INNER JOIN metadatavalue AS v ON v.resource_id=i.item_id
+                    INNER JOIN metadatafieldregistry AS r ON v.metadata_field_id=r.metadata_field_id
+                    INNER JOIN metadataschemaregistry AS schema ON schema.metadata_schema_id=r.metadata_schema_id
+
+                    WHERE v.text_value=$4
+                      AND v.resource_type_id=2
+                      AND schema.short_id=$1
+                      AND r.element=$2
+                      AND r.qualifier=$3
+
+                    GROUP BY item_id
+                    LIMIT $5
+              )
+          );
         SQL
       end
 
@@ -202,34 +266,10 @@ module CLI
         end
       end
 
-      def build_select_item_by_metadata_query
-        <<-SQL
-        SELECT i2.item_id, i2.submitter_id, i2.in_archive, i2.withdrawn, i2.owning_collection, i2.last_modified, i2.discoverable, s2.short_id, r2.element, r2.qualifier, v2.metadata_field_id,v2.text_value, v2.text_lang, v2.resource_type_id
-          FROM item AS i2
-          INNER JOIN metadatavalue AS v2 ON v2.resource_id=i2.item_id
-          INNER JOIN metadatafieldregistry AS r2 ON r2.metadata_field_id=v2.metadata_field_id
-          INNER JOIN metadataschemaregistry AS s2 ON s2.metadata_schema_id=r2.metadata_schema_id
-
-          WHERE i2.item_id IN (
-
-            SELECT i.item_id FROM item AS i
-              INNER JOIN metadatavalue AS v ON v.resource_id=i.item_id
-              INNER JOIN metadatafieldregistry AS r ON r.metadata_field_id=v.metadata_field_id
-              INNER JOIN metadataschemaregistry AS s ON s.metadata_schema_id=r.metadata_schema_id
-              WHERE s.short_id=$1
-                AND r.element=$2
-                AND r.qualifier=$3
-                AND v.text_value=$4
-              GROUP BY item_id
-              LIMIT 1
-          )
-        SQL
-      end
-
       def select_item_by_metadata(metadata_field, metadata_value)
-        query = build_select_item_by_metadata_query
+        query = build_select_items_by_metadata_query
         schema_name, metadata_field_element, metadata_field_qualifier = metadata_field.split('.')
-        execute_statement(query, schema_name, metadata_field_element, metadata_field_qualifier, metadata_value)
+        execute_statement(query, schema_name, metadata_field_element, metadata_field_qualifier, metadata_value, 1)
       end
 
       def build_update_resource_policies_statement
@@ -251,11 +291,11 @@ module CLI
       end
 
       def build_insert_bundle_statement
-        'INSERT into bundle (bundle_id, primary_bitstream_id) VALUES ($1, $2)'
+        'INSERT into bundle (bundle_id, primary_bitstream_id) VALUES (DEFAULT, $1)'
       end
 
       def build_insert_item_to_bundle_statement
-        'INSERT INTO item2bundle (id, item_id, bundle_id) VALUES ($1, $2, $3)'
+        'INSERT INTO item2bundle (id, item_id, bundle_id) VALUES (DEFAULT, $1, $2)'
       end
 
       def build_update_item_to_bundle_statement
@@ -289,22 +329,24 @@ module CLI
         execute_statement(update_statement, next_item_id, prev_item_id)
       end
 
+      # This might be deprecated
       def insert_bundle(next_item_id, *bundle_values)
         bundle_id = bundle_values.first
         insert_statement = build_insert_bundle_statement
         execute_statement(insert_statement, *bundle_values)
 
-        next_item_to_bundle_id = select_next_item_to_bundle_id
         insert_i2b_statement = build_insert_item_to_bundle_statement
-        execute_statement(insert_i2b_statement, next_item_to_bundle_id, next_item_id, bundle_id)
+        execute_statement(insert_i2b_statement, next_item_id, bundle_id)
       end
 
+      # Deprecated
       def build_insert_bitstream_statement
-        'INSERT into bitstream (bitstream_id, bitstream_format_id, checksum, checksum_algorithm, internal_id, deleted, store_number, sequence_id, size_bytes) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)'
+        'INSERT into bitstream (bitstream_id, bitstream_format_id, checksum, checksum_algorithm, internal_id, deleted, store_number, sequence_id, size_bytes) VALUES (DEFAULT, $1, $2, $3, $4, $5, $6, $7, $8)'
       end
 
-      def build_update_bitstream_statement
-        'INSERT INTO bundle2bitstream (id, bundle_id, bitstream_id, bitstream_order) VALUES ($1, $2, $3, $4)'
+      # Deprecated
+      def build_insert_bundle_to_bitstream_statement
+        'INSERT INTO bundle2bitstream (id, bundle_id, bitstream_id, bitstream_order) VALUES (DEFAULT, $1, $2, $3)'
       end
 
       def build_select_new_bitstream_id
@@ -339,12 +381,12 @@ module CLI
       end
 
       def build_update_handle_statement
-        'UPDATE handle SET resource_id=$1 WHERE resource_id=$2'
+        'UPDATE handle SET resource_id=$1, handle=$3 WHERE resource_id=$2'
       end
 
-      def update_handle(next_item_id, item_id)
+      def update_handle(next_item_id, item_id, handle)
         statement = build_update_handle_statement
-        execute_statement(statement, next_item_id, item_id)
+        execute_statement(statement, next_item_id, item_id, handle)
       end
 
       def build_update_workflow_item_statement
