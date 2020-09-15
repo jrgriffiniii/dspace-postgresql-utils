@@ -127,6 +127,21 @@ module CLI
         rows.to_a.map { |row| row['text_value'] }
       end
 
+      def find_metadata_field_id(metadata_field)
+        statement =<<-SQL
+
+        SELECT r.metadata_field_id FROM metadatafieldregistry AS r
+          INNER JOIN metadataschemaregistry AS s ON s.metadata_schema_id=r.metadata_schema_id
+          WHERE s.short_id = $1
+            AND r.element = $2
+            AND r.qualifier = $3
+        SQL
+
+        schema_name, metadata_field_element, metadata_field_qualifier = metadata_field.split('.')
+        rows = execute_statement(statement, schema_name, metadata_field_element, metadata_field_qualifier)
+        rows.to_a.map { |row| row['metadata_field_id'] }
+      end
+
       def insert_item(*item_values)
         statement = build_insert_item_statement
         execute_statement(statement, *item_values)
@@ -167,7 +182,20 @@ module CLI
       end
 
       def build_insert_metadata_value_statement
-        'INSERT INTO metadatavalue (metadata_value_id, resource_id, metadata_field_id, text_value, text_lang, resource_type_id) VALUES (DEFAULT, $1, $2, $3, $4, $5)'
+        <<-SQL
+        INSERT INTO metadatavalue (
+          metadata_value_id,
+          resource_id,
+          metadata_field_id,
+          text_value,
+          text_lang,
+          resource_type_id
+        ) VALUES (
+          DEFAULT, $1, $2, $3, $4, $5
+        )
+
+        RETURNING metadata_value_id
+        SQL
       end
 
       def alter_sequence_metadatavalue
@@ -181,6 +209,33 @@ module CLI
         alter_sequence_metadatavalue
         statement = build_insert_metadata_value_statement
         execute_statement(statement, *metadata_values)
+      end
+
+      def update_metadata_by_resource_id(metadata_field, value, resource_id)
+        schema_name, metadata_field_element, metadata_field_qualifier = metadata_field.split('.')
+
+
+        statement = <<-SQL
+
+        UPDATE metadatavalue AS v2
+          SET text_value=$5
+          WHERE
+            metadata_value_id = (
+
+            SELECT v.metadata_value_id
+              FROM metadatavalue AS v
+              INNER JOIN metadatafieldregistry AS r ON r.metadata_field_id=v.metadata_field_id
+              INNER JOIN metadataschemaregistry AS s ON s.metadata_schema_id=r.metadata_schema_id
+              WHERE s.short_id = $1
+                AND r.element = $2
+                AND r.qualifier = $3
+                AND v.resource_id=$4
+              LIMIT 1
+          )
+          RETURNING metadata_value_id
+        SQL
+
+        execute_statement(statement, schema_name, metadata_field_element, metadata_field_qualifier, resource_id, value)
       end
 
       def build_delete_metadata_value_statement
@@ -492,6 +547,23 @@ module CLI
             execute_statement(statement, next_item_id, item_id)
           end
         end
+      end
+
+      def update_handle_by_title(handle, title)
+        statement = <<-SQL
+        UPDATE handle AS h SET handle=$1
+          WHERE resource_id=(
+
+            SELECT v.resource_id
+              FROM metadatavalue AS v
+              INNER JOIN handle AS h ON h.resource_id=v.resource_id
+              WHERE v.text_value=$2
+              LIMIT 1
+          )
+          RETURNING resource_id
+        SQL
+
+        execute_statement(statement, handle, title)
       end
 
       def build_update_workflow_item_statement

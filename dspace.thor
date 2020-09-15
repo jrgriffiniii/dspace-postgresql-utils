@@ -8,18 +8,43 @@ require 'logger'
 require 'pry-byebug'
 
 require_relative 'cli/dspace/repository'
+
 require_relative 'cli/dspace/migration_job'
+require_relative 'cli/dspace/update_handles_job.rb'
+
 require_relative 'cli/dspace/migration_report'
 require_relative 'cli/dspace/metadata_report'
 
 class Dspace < Thor
+  namespace :dspace
+
+  desc 'update_handles', 'Update Handles using a CSV'
+  option :db_config_file_path, type: :string, aliases: '-c'
+  option :report_file_path, type: :string, required: true, aliases: '-f'
+  def update_handles
+    db_config_file_path = options.fetch(:db_config_file, File.join(File.dirname(__FILE__), 'config', 'databases.yml'))
+    db_config = build_db_configuration(db_config_file_path)
+
+    dest_db_host = db_config.destination_database.host
+    dest_db_port = db_config.destination_database.port
+    dest_db_name = db_config.destination_database.name
+    dest_db_user = db_config.destination_database.user
+    dest_db_password = db_config.destination_database.password
+
+    dest_dspace = CLI::DSpace::Repository.new(dest_db_host, dest_db_port, dest_db_name, dest_db_user, dest_db_password)
+
+    report_file_path = options.fetch(:report_file_path)
+
+    job = CLI::DSpace::UpdateHandlesJob.new(csv_file_path: report_file_path, destination_repository: dest_dspace)
+    job.perform
+  end
+
   desc 'generate_ark_report', 'Generate a report of the ARKs'
   option :db_config_file_path, type: :string, aliases: '-c'
   option :limit, type: :numeric, required: false, aliases: '-l'
   option :query_field, type: :string, required: true, aliases: '-f'
   option :query_value, type: :string, required: true, aliases: '-v'
   option :exported_fields, type: :string, required: true, aliases: '-e'
-
   def generate_ark_report
     db_config_file_path = options.fetch(:db_config_file, File.join(File.dirname(__FILE__), 'config', 'databases.yml'))
     db_config = build_db_configuration(db_config_file_path)
@@ -46,7 +71,6 @@ class Dspace < Thor
     metadata_report.write
   end
 
-  namespace :dspace
 
   desc 'migrate_items_by_metadata', 'Migrate a set of Items between DSpace installations, filtered by a specific metadata field and value'
   option :metadata_field, type: :string, required: true, aliases: '-f'
