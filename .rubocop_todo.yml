@@ -27,6 +27,7 @@ Style/Documentation:
     - 'spec/**/*'
     - 'test/**/*'
     - 'cli/dspace/connection.rb'
+    - 'cli/dspace/metadata_report.rb'
     - 'cli/dspace/migration_job.rb'
     - 'cli/dspace/migration_report.rb'
     - 'cli/dspace/repository.rb'
@@ -36,5 +37,5 @@ Style/Documentation:
 # Cop supports --auto-correct.
 # Configuration parameters: AutoCorrect, AllowHeredoc, AllowURI, URISchemes, IgnoreCopDirectives, IgnoredPatterns.
 # URISchemes: http, https
-# Layout/LineLength:
-#   Max: 319
+Layout/LineLength:
+   Max: 319

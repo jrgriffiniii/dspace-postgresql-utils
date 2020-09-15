@@ -107,6 +107,7 @@ Metrics/BlockLength:
 Metrics/ClassLength:
   Exclude:
     - cli/dspace/connection.rb
+    - cli/dspace/metadata_report.rb
     - cli/dspace/migration_job.rb
 Metrics/MethodLength:
   Exclude:

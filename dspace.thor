@@ -10,8 +10,42 @@ require 'pry-byebug'
 require_relative 'cli/dspace/repository'
 require_relative 'cli/dspace/migration_job'
 require_relative 'cli/dspace/migration_report'
+require_relative 'cli/dspace/metadata_report'
 
 class Dspace < Thor
+  desc 'generate_ark_report', 'Generate a report of the ARKs'
+  option :db_config_file_path, type: :string, aliases: '-c'
+  option :limit, type: :numeric, required: false, aliases: '-l'
+  option :query_field, type: :string, required: true, aliases: '-f'
+  option :query_value, type: :string, required: true, aliases: '-v'
+  option :exported_fields, type: :string, required: true, aliases: '-e'
+
+  def generate_ark_report
+    db_config_file_path = options.fetch(:db_config_file, File.join(File.dirname(__FILE__), 'config', 'databases.yml'))
+    db_config = build_db_configuration(db_config_file_path)
+
+    db_host = db_config.source_database.host
+    db_port = db_config.source_database.port
+    db_name = db_config.source_database.name
+    db_user = db_config.source_database.user
+    db_password = db_config.source_database.password
+
+    report_config_file_path = options.fetch(:report_config_file, File.join(File.dirname(__FILE__), 'config', 'reports.yml'))
+    report_config = build_report_configuration(report_config_file_path)
+
+    metadata_field = options.fetch(:query_field)
+    metadata_value = options[:query_value]
+    exported_fields_value = options[:exported_fields]
+    exported_fields = exported_fields_value.split(',')
+    limit = options[:limit]
+
+    source_dspace = CLI::DSpace::Repository.new(db_host, db_port, db_name, db_user, db_password)
+
+    query_results = source_dspace.connection.select_metadata(metadata_field, metadata_value, limit)
+    metadata_report = CLI::DSpace::MetadataReport.new(query_results: query_results, metadata_fields: exported_fields, configuration: report_config)
+    metadata_report.write
+  end
+
   namespace :dspace
 
   desc 'migrate_items_by_metadata', 'Migrate a set of Items between DSpace installations, filtered by a specific metadata field and value'
