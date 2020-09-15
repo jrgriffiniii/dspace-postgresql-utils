@@ -112,5 +112,6 @@ Metrics/ClassLength:
 Metrics/MethodLength:
   Exclude:
     - dspace.thor
+    - cli/dspace/metadata_report.rb
     - cli/dspace/migration_job.rb
     - cli/dspace/migration_report.rb

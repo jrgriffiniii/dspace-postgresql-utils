@@ -26,6 +26,10 @@ module CLI
         ]
       end
 
+      def headers
+        ['item_id', *@metadata_fields]
+      end
+
       def metadata_schemata
         @metadata_fields.map { |f| f.split('.').first }
       end
@@ -53,10 +57,12 @@ module CLI
         metadata_schemata.include?(row['short_id']) && metadata_elements.include?(row['element']) && (metadata_qualifiers.include?(row['qualifier']) || metadata_qualifiers.length < metadata_elements.length || metadata_qualifiers.empty?)
       end
 
-      def row_matches?(row)
-        return nested_row_matches?(row) if @matched_rows.include?(row['item_id'])
+      def row_matches?(row, field_index = 0)
+        return if @metadata_fields.length < field_index + 1
 
-        output = metadata_schemata.first == row['short_id'] && metadata_elements.first == row['element'] && (metadata_qualifiers.first == row['qualifier'] || metadata_qualifiers.length < metadata_elements.length || metadata_qualifiers.empty?)
+        return row_matches?(row, field_index + 1) if @matched_rows.include?(row['item_id']) && @metadata_fields.length > field_index + 1
+
+        output = metadata_schemata[field_index] == row['short_id'] && metadata_elements[field_index] == row['element'] && (metadata_qualifiers[field_index] == row['qualifier'] || metadata_qualifiers.length < metadata_elements.length || metadata_qualifiers.empty?)
 
         @matched_rows << row['item_id'] if output
 
@@ -81,19 +87,29 @@ module CLI
       end
 
       def rows
-        values = []
+        indexed_values = {}
 
         selected_rows.each do |row|
           text_value = row['text_value']
-          values << row.values_at('item_id', 'short_id', 'element', 'qualifier', 'text_value', 'text_lang') unless reject?(text_value)
+          next if reject?(text_value)
+
+          item_id = row['item_id']
+          if indexed_values.key?(item_id)
+            # indexed_values[item_id] += row.values_at('short_id', 'element', 'qualifier', 'text_value', 'text_lang')
+            indexed_values[item_id] += row.values_at('text_value')
+          else
+            # indexed_values[item_id] = row.values_at('item_id', 'short_id', 'element', 'qualifier', 'text_value', 'text_lang')
+            indexed_values[item_id] = row.values_at('item_id', 'text_value')
+          end
         end
 
-        values
+        indexed_values.values
       end
 
       def generate
         output = CSV.generate do |csv|
-          csv << self.class.headers
+          # csv << self.class.headers + @metadata_fields
+          csv << headers
 
           rows.each do |row|
             csv << row

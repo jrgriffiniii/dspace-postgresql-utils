@@ -89,7 +89,16 @@ module CLI
       end
 
       def build_select_item_by_title_query
-        "SELECT i.item_id FROM item as i INNER JOIN metadatavalue AS v ON v.resource_id=i.item_id INNER JOIN metadatafieldregistry AS r ON r.metadata_field_id=v.metadata_field_id WHERE r.metadata_schema_id=1 AND r.element='title' AND r.qualifier IS NULL AND v.text_value=$1"
+        "SELECT i.item_id
+
+          FROM item as i
+            INNER JOIN metadatavalue AS v ON v.resource_id=i.item_id
+            INNER JOIN metadatafieldregistry AS r ON r.metadata_field_id=v.metadata_field_id
+          WHERE v.resource_type_id=2
+            AND r.metadata_schema_id=1
+            AND r.element='title'
+            AND r.qualifier IS NULL
+            AND v.text_value=$1"
       end
 
       def find_by_title_metadata(title)
@@ -99,7 +108,17 @@ module CLI
       end
 
       def build_select_title_by_item_query
-        "SELECT v.text_value FROM item as i INNER JOIN metadatavalue AS v ON v.resource_id=i.item_id INNER JOIN metadatafieldregistry AS r ON r.metadata_field_id=v.metadata_field_id WHERE r.metadata_schema_id=1 AND r.element='title' AND r.qualifier IS NULL AND i.item_id=$1"
+        "SELECT v.text_value
+
+          FROM item as i
+            INNER JOIN metadatavalue AS v ON v.resource_id=i.item_id
+            INNER JOIN metadatafieldregistry AS r ON r.metadata_field_id=v.metadata_field_id
+
+          WHERE v.resource_type_id=2
+            AND r.metadata_schema_id=1
+            AND r.element='title'
+            AND r.qualifier IS NULL
+            AND i.item_id=$1"
       end
 
       def find_titles_by_item_id(item_id)
@@ -194,6 +213,76 @@ module CLI
         @connection = build_connection
       end
 
+      def build_select_metadata_query
+        <<-SQL
+        SELECT i3.item_id, i3.submitter_id, i3.in_archive, i3.withdrawn, i3.owning_collection, i3.last_modified, i3.discoverable, schema3.short_id, r3.element, r3.qualifier, v3.metadata_field_id, v3.text_value, v3.text_lang, v3.resource_type_id, h.handle
+          FROM item AS i3
+          INNER JOIN metadatavalue AS v3 ON v3.resource_id=i3.item_id
+          INNER JOIN metadatafieldregistry AS r3 ON v3.metadata_field_id=r3.metadata_field_id
+          INNER JOIN metadataschemaregistry AS schema3 ON schema3.metadata_schema_id=r3.metadata_schema_id
+          LEFT JOIN handle AS h ON h.resource_id=i3.item_id
+
+          WHERE i3.item_id in (
+                  SELECT i.item_id
+                    FROM item AS i
+                    INNER JOIN metadatavalue AS v ON v.resource_id=i.item_id
+                    INNER JOIN metadatafieldregistry AS r ON v.metadata_field_id=r.metadata_field_id
+                    INNER JOIN metadataschemaregistry AS schema ON schema.metadata_schema_id=r.metadata_schema_id
+
+                    WHERE v.text_value=$4
+                      AND v.resource_type_id=2
+                      AND schema.short_id=$1
+                      AND r.element=$2
+                      AND r.qualifier=$3
+
+                    GROUP BY item_id
+          );
+        SQL
+      end
+
+      def build_select_limited_metadata_query
+        <<-SQL
+        SELECT i3.item_id, i3.submitter_id, i3.in_archive, i3.withdrawn, i3.owning_collection, i3.last_modified, i3.discoverable, schema3.short_id, r3.element, r3.qualifier, v3.metadata_field_id, v3.text_value, v3.text_lang, v3.resource_type_id, h.handle
+          FROM item AS i3
+          INNER JOIN metadatavalue AS v3 ON v3.resource_id=i3.item_id
+          INNER JOIN metadatafieldregistry AS r3 ON v3.metadata_field_id=r3.metadata_field_id
+          INNER JOIN metadataschemaregistry AS schema3 ON schema3.metadata_schema_id=r3.metadata_schema_id
+          LEFT JOIN handle AS h ON h.resource_id=i3.item_id
+
+          WHERE r3.element=$2
+            AND r3.qualifier=$3
+            AND v3.text_value=$4
+            AND i3.item_id in (
+                  SELECT i.item_id
+                    FROM item AS i
+                    INNER JOIN metadatavalue AS v ON v.resource_id=i.item_id
+                    INNER JOIN metadatafieldregistry AS r ON v.metadata_field_id=r.metadata_field_id
+                    INNER JOIN metadataschemaregistry AS schema ON schema.metadata_schema_id=r.metadata_schema_id
+
+                    WHERE v.text_value=$4
+                      AND v.resource_type_id=2
+                      AND schema.short_id=$1
+                      AND r.element=$2
+                      AND r.qualifier=$3
+
+                    GROUP BY item_id
+                    LIMIT $5
+          );
+        SQL
+
+      end
+
+      def select_metadata(metadata_field, metadata_value, limit = nil)
+        schema_name, metadata_field_element, metadata_field_qualifier = metadata_field.split('.')
+        if limit.nil?
+          query = build_select_metadata_query
+          rows = execute_statement(query, schema_name, metadata_field_element, metadata_field_qualifier, metadata_value)
+        else
+          query = build_select_limited_metadata_query
+          execute_statement(query, schema_name, metadata_field_element, metadata_field_qualifier, metadata_value, limit)
+        end
+      end
+
       def build_select_items_by_metadata_query
         <<-SQL
         SELECT i2.item_id, i2.submitter_id, i2.in_archive, i2.withdrawn, i2.owning_collection, i2.last_modified, i2.discoverable, schema2.short_id, r2.element, r2.qualifier, v2.metadata_field_id,v2.text_value, v2.text_lang, v2.resource_type_id, h.handle
@@ -201,10 +290,9 @@ module CLI
           INNER JOIN metadatavalue AS v2 ON v2.resource_id=i2.item_id
           INNER JOIN metadatafieldregistry AS r2 ON v2.metadata_field_id=r2.metadata_field_id
           INNER JOIN metadataschemaregistry AS schema2 ON schema2.metadata_schema_id=r2.metadata_schema_id
-          INNER JOIN handle AS h ON h.resource_id=i2.item_id
+          LEFT JOIN handle AS h ON h.resource_id=i2.item_id
 
-          WHERE v2.resource_type_id=2
-            AND i2.item_id IN (
+          WHERE i2.item_id IN (
 
               SELECT i.item_id
                 FROM item AS i
@@ -216,25 +304,21 @@ module CLI
                   AND schema.short_id=$1
                   AND r.element=$2
                   AND r.qualifier=$3
+                GROUP BY i.item_id
           )
         SQL
       end
 
       def build_select_limited_items_by_metadata_query
         <<-SQL
-        SELECT i3.item_id, i3.submitter_id, i3.in_archive, i3.withdrawn, i3.owning_collection, i3.last_modified, i3.discoverable, schema3.short_id, r3.element, r3.qualifier, v3.metadata_field_id, v3.text_value, v3.text_lang, v3.resource_type_id
+        SELECT i3.item_id, i3.submitter_id, i3.in_archive, i3.withdrawn, i3.owning_collection, i3.last_modified, i3.discoverable, schema3.short_id, r3.element, r3.qualifier, v3.metadata_field_id, v3.text_value, v3.text_lang, v3.resource_type_id, h.handle
           FROM item AS i3
           INNER JOIN metadatavalue AS v3 ON v3.resource_id=i3.item_id
           INNER JOIN metadatafieldregistry AS r3 ON v3.metadata_field_id=r3.metadata_field_id
           INNER JOIN metadataschemaregistry AS schema3 ON schema3.metadata_schema_id=r3.metadata_schema_id
+          LEFT JOIN handle AS h ON h.resource_id=i3.item_id
 
           WHERE i3.item_id in (
-            SELECT distinct(i2.item_id)
-              FROM item AS i2
-              INNER JOIN metadatavalue AS v2 ON v2.resource_id=i2.item_id
-
-              WHERE v2.resource_type_id=2
-                AND i2.item_id IN (
 
                   SELECT i.item_id
                     FROM item AS i
@@ -250,7 +334,6 @@ module CLI
 
                     GROUP BY item_id
                     LIMIT $5
-              )
           );
         SQL
       end
@@ -384,9 +467,31 @@ module CLI
         'UPDATE handle SET resource_id=$1, handle=$3 WHERE resource_id=$2'
       end
 
-      def update_handle(next_item_id, item_id, handle)
-        statement = build_update_handle_statement
-        execute_statement(statement, next_item_id, item_id, handle)
+      def build_update_existing_handle_statement
+        'UPDATE handle SET resource_id=$1 WHERE resource_id=$2'
+      end
+
+      def build_delete_existing_handle_statement
+        'DELETE FROM handle WHERE resource_id=$1 AND handle=$2'
+      end
+
+      def replace_handle(next_item_id, item_id, handle = nil)
+        if handle.nil?
+          statement = build_update_existing_handle_statement
+          execute_statement(statement, next_item_id, item_id)
+        else
+          begin
+            delete_statement = build_update_handle_statement
+            execute_statement(delete_statement, item_id, handle)
+
+            statement = build_update_handle_statement
+            execute_statement(statement, next_item_id, item_id, handle)
+          rescue StandardError
+            # This arises typically when the foreign key error indicates that the tuple exists for the newly-created Item?
+            statement = build_update_existing_handle_statement
+            execute_statement(statement, next_item_id, item_id)
+          end
+        end
       end
 
       def build_update_workflow_item_statement
