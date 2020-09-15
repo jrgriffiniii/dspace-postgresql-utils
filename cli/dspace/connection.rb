@@ -128,7 +128,7 @@ module CLI
       end
 
       def find_metadata_field_id(metadata_field)
-        statement =<<-SQL
+        statement = <<-SQL
 
         SELECT r.metadata_field_id FROM metadatafieldregistry AS r
           INNER JOIN metadataschemaregistry AS s ON s.metadata_schema_id=r.metadata_schema_id
@@ -213,7 +213,6 @@ module CLI
 
       def update_metadata_by_resource_id(metadata_field, value, resource_id)
         schema_name, metadata_field_element, metadata_field_qualifier = metadata_field.split('.')
-
 
         statement = <<-SQL
 
@@ -324,14 +323,13 @@ module CLI
                     LIMIT $5
           );
         SQL
-
       end
 
       def select_metadata(metadata_field, metadata_value, limit = nil)
         schema_name, metadata_field_element, metadata_field_qualifier = metadata_field.split('.')
         if limit.nil?
           query = build_select_metadata_query
-          rows = execute_statement(query, schema_name, metadata_field_element, metadata_field_qualifier, metadata_value)
+          execute_statement(query, schema_name, metadata_field_element, metadata_field_qualifier, metadata_value)
         else
           query = build_select_limited_metadata_query
           execute_statement(query, schema_name, metadata_field_element, metadata_field_qualifier, metadata_value, limit)
@@ -564,6 +562,16 @@ module CLI
         SQL
 
         execute_statement(statement, handle, title)
+      end
+
+      def update_handle_by_handle(handle, resource_id)
+        statement = <<-SQL
+        UPDATE handle AS h SET resource_id=$2
+          WHERE handle=$1
+          RETURNING resource_id
+        SQL
+
+        execute_statement(statement, handle, resource_id)
       end
 
       def build_update_workflow_item_statement

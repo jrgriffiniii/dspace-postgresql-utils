@@ -5,7 +5,6 @@ require 'csv'
 module CLI
   module DSpace
     class UpdateHandlesJob
-
       def initialize(**options)
         @csv_file_path = options[:csv_file_path]
         @destination_repository = options[:destination_repository]
@@ -76,7 +75,6 @@ module CLI
       end
 
       def update_handle(handle, title)
-
         begin
           results = @destination_repository.connection.update_handle_by_title(handle, title)
           rows = results.to_a
@@ -89,13 +87,18 @@ module CLI
             resource_id = row['resource_id']
             logger.info "Updated #{handle} for #{resource_id}"
           end
-        rescue PG::UniqueViolation => unique_fkey_error
-          logger.info "Handle #{handle} already set for the resources matching #{title}"
+        rescue PG::UniqueViolation
+          logger.debug "Handle #{handle} already set for the resources matching #{title}"
           id_results = @destination_repository.connection.find_by_title_metadata(title)
 
-          # Update here
-          binding.pry
           resource_id = id_results.first
+          update_results = @destination_repository.connection.update_handle_by_handle(handle, resource_id)
+          rows = update_results.to_a
+          if rows.empty?
+            logger.warn "Failed to update #{handle} for #{resource_id}"
+          else
+            logger.info "Updated #{handle} for #{resource_id}"
+          end
         end
 
         resource_id
@@ -103,7 +106,6 @@ module CLI
 
       def perform
         csv_rows.each do |row|
-
           identifier_uri = row[csv_handle_column_index]
           handle = identifier_uri.gsub(self.class.handle_uri_base, '')
           title = row[csv_title_column_index]
@@ -135,7 +137,6 @@ module CLI
       def csv
         @csv ||= CSV.parse(csv_file, headers: true)
       end
-
     end
   end
 end

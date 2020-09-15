@@ -1,2 +1,6 @@
 .yardoc/
 doc/
+
+database_exports/*sql
+database_exports/*c
+reports/*csv
