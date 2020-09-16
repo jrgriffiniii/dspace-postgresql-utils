@@ -110,6 +110,7 @@ Metrics/ClassLength:
     - cli/dspace/metadata_report.rb
     - cli/dspace/migration_job.rb
     - cli/dspace/update_handles_job.rb
+    - dspace.thor
 Metrics/MethodLength:
   Exclude:
     - dspace.thor

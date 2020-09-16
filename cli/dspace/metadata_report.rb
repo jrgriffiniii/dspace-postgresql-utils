@@ -9,6 +9,7 @@ module CLI
         @query_results = options[:query_results]
         @metadata_fields = options[:metadata_fields]
         @configuration = options[:configuration]
+        @output_file_path = options[:output_file]
       end
 
       def self.build_timestamp
@@ -140,8 +141,10 @@ module CLI
       end
 
       def output_file_path
-        value = File.join(output_dir_path, output_file_name)
-        Pathname.new(value)
+        @output_file_path ||= begin
+                                value = File.join(output_dir_path, output_file_name)
+                                Pathname.new(value)
+                              end
       end
 
       def output_file
